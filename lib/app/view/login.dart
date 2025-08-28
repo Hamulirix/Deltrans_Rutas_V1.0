@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/app/view/home.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
@@ -17,40 +18,56 @@ class _LoginPageState extends State<LoginPage> {
   String? _errorMessage;
 
   Future<void> _login() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  setState(() {
+    _isLoading = true;
+    _errorMessage = null;
+  });
 
-    try {
-      final result = await api.login(
-        _usernameController.text.trim(),
-        _passwordController.text.trim(),
+  try {
+    final result = await api.login(
+      _usernameController.text.trim(),
+      _passwordController.text.trim(),
+    );
+
+    if (result != null && result["access_token"] != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("jwt_token", result["access_token"]);
+      await prefs.setInt(
+        "id_tipo_trabajador",
+        result["trabajador"]["id_tipo_trabajador"],
       );
-      
-      print("Respuesta login: $result");
-      if (result != null && result["access_token"] != null) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("jwt_token", result["access_token"]);
 
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, "/home");
-        }
-      } else {
-        setState(() {
-          _errorMessage = "Credenciales incorrectas";
-        });
+      // Concatenar nombre + apellidos
+      final nombreCompleto =
+          "${result["trabajador"]["nombres"]} ${result["trabajador"]["apellidos"]}";
+      await prefs.setString("nombre", nombreCompleto);
+
+      if (mounted) {
+        final rol = result["trabajador"]["id_tipo_trabajador"];
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                Home(nombre: nombreCompleto, rol: rol == 1 ? "gerente" : "conductor"),
+          ),
+        );
       }
-    } catch (e) {
+    } else {
       setState(() {
-        _errorMessage = e.toString();
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
+        _errorMessage = "Credenciales incorrectas";
       });
     }
+  } catch (e) {
+    setState(() {
+      _errorMessage = e.toString();
+    });
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
   }
+}
+
 
   @override
   Widget build(BuildContext context) {

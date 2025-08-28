@@ -14,7 +14,7 @@ class ApiService {
       );
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body); // debería incluir { "token": "..." }
+        return jsonDecode(response.body); 
       } else {
         return null;
       }
