@@ -245,6 +245,7 @@ class _ResultadoRutasPageState extends State<ResultadoRutasPage> {
                           if (!mounted) return;
 
                           // ✅ Mensaje de éxito
+                          // ignore: use_build_context_synchronously
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text("Rutas guardadas correctamente ✅"),
@@ -276,6 +277,7 @@ class _ResultadoRutasPageState extends State<ResultadoRutasPage> {
 
                           // ✅ Ir a Home con nombre y rol
                           Navigator.pushAndRemoveUntil(
+                            // ignore: use_build_context_synchronously
                             context,
                             MaterialPageRoute(
                               builder: (_) => Home(nombre: nombre, rol: rol),
