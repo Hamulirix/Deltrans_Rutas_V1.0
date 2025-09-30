@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_application_1/app/services/api_service.dart';
 import 'package:flutter_application_1/app/view/carga_optimizar.dart';
-import 'package:flutter_application_1/app/view/resultados_rutas.dart';
+import 'package:flutter_application_1/app/view/resultados_mapa_rutas.dart';
 
 class OptimizarRutasPage extends StatefulWidget {
   const OptimizarRutasPage({super.key});
@@ -64,7 +64,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => ResultadoRutasPage(apiData: result),
+            builder: (_) => ResultadoRutasMapaPage(apiData: result),
           ),
         );
       }

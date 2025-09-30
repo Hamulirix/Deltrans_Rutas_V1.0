@@ -53,37 +53,47 @@ class _PerfilPageState extends State<PerfilPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const CircleAvatar(
-                radius: 50,
-                child: Icon(Icons.person, size: 50),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                "${widget.nombre} $apellidos",
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                "Rol: $rol",
-                style: const TextStyle(fontSize: 18),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: _logout,
-                icon: const Icon(Icons.logout),
-                label: const Text("Cerrar Sesión"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+        child: Center( // 👈 Centra toda la columna
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center, // 👈 Centra verticalmente
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const CircleAvatar(
+                  radius: 50,
+                  child: Icon(Icons.person, size: 50),
                 ),
-              ),
-            ],
+                const SizedBox(height: 20),
+                Text(
+                  "${widget.nombre} $apellidos",
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  "Rol: $rol",
+                  style: const TextStyle(fontSize: 18),
+                ),
+                const SizedBox(height: 40),
+                ElevatedButton.icon(
+                  onPressed: _logout,
+                  icon: const Icon(Icons.logout),
+                  label: const Text("Cerrar Sesión"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 30,
+                      vertical: 15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
