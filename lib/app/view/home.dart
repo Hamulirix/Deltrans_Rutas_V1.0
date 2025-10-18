@@ -6,9 +6,15 @@ import 'package:flutter_application_1/app/view/perfil_page.dart';
 
 class Home extends StatefulWidget {
   final String nombre;
-  final String rol;
+  final String rol;          // "gerente" | "conductor"
+  final String? placaCamion; // solo para conductor
 
-  const Home({super.key, required this.nombre, required this.rol});
+  const Home({
+    super.key,
+    required this.nombre,
+    required this.rol,
+    this.placaCamion,
+  });
 
   @override
   State<Home> createState() => _HomeState();
@@ -17,24 +23,69 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   int currentPageIndex = 0;
 
-  // Títulos para cada página
-  final List<String> pageTitles = const [
-    "Inicio",
-    "Gestionar",
-    "Perfil"
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      widget.rol == "conductor"
-          ? InicioConductor(nombre: widget.nombre)
-          : InicioGerente(nombre: widget.nombre),
-      const GestionarPage(),
-      PerfilPage(nombre: widget.nombre),
-    ];
+    final isConductor = widget.rol == "conductor";
 
-    // Solo móvil: usar NavigationBar inferior
+    // Páginas según rol
+    final pages = isConductor
+        ? <Widget>[
+            InicioConductor(nombre: widget.nombre, placa: widget.placaCamion),
+            PerfilPage(nombre: widget.nombre),
+          ]
+        : <Widget>[
+            InicioGerente(nombre: widget.nombre),
+            const GestionarPage(),
+            PerfilPage(nombre: widget.nombre),
+          ];
+
+    // Títulos según rol
+    final pageTitles = isConductor
+        ? const ["Inicio", "Perfil"]
+        : const ["Inicio", "Gestionar", "Perfil"];
+
+    // Destinos de navegación según rol
+    final destinations = isConductor
+        ? <NavigationDestination>[
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined, color: Colors.grey[600]),
+              selectedIcon:
+                  Icon(Icons.home, color: Theme.of(context).colorScheme.primary),
+              label: "Inicio",
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline, color: Colors.grey[600]),
+              selectedIcon:
+                  Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
+              label: "Perfil",
+            ),
+          ]
+        : <NavigationDestination>[
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined, color: Colors.grey[600]),
+              selectedIcon:
+                  Icon(Icons.home, color: Theme.of(context).colorScheme.primary),
+              label: "Inicio",
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.work_outline, color: Colors.grey[600]),
+              selectedIcon:
+                  Icon(Icons.work, color: Theme.of(context).colorScheme.primary),
+              label: "Gestionar",
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline, color: Colors.grey[600]),
+              selectedIcon:
+                  Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
+              label: "Perfil",
+            ),
+          ];
+
+    // Evita desbordes si cambió la cantidad de tabs
+    if (currentPageIndex >= pages.length) {
+      currentPageIndex = 0;
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -59,45 +110,9 @@ class _HomeState extends State<Home> {
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           selectedIndex: currentPageIndex,
           onDestinationSelected: (int index) {
-            setState(() {
-              currentPageIndex = index;
-            });
+            setState(() => currentPageIndex = index);
           },
-          destinations: [
-            NavigationDestination(
-              icon: Icon(
-                Icons.home_outlined,
-                color: Colors.grey[600],
-              ),
-              selectedIcon: Icon(
-                Icons.home,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              label: "Inicio",
-            ),
-            NavigationDestination(
-              icon: Icon(
-                Icons.work_outline,
-                color: Colors.grey[600],
-              ),
-              selectedIcon: Icon(
-                Icons.work,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              label: "Gestionar",
-            ),
-            NavigationDestination(
-              icon: Icon(
-                Icons.person_outline,
-                color: Colors.grey[600],
-              ),
-              selectedIcon: Icon(
-                Icons.person,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              label: "Perfil",
-            ),
-          ],
+          destinations: destinations,
         ),
       ),
     );

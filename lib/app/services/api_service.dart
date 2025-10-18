@@ -1,12 +1,413 @@
+// api_service.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class ApiService {
-  final String baseUrl = "http://10.0.2.2:5000/api"; 
+/// Excepción HTTP legible
+class ApiException extends HttpException {
+  final int? statusCode;
+  ApiException(super.message, {this.statusCode});
 
+  @override
+  String toString() => ' $message';
+}
+
+/// =============================
+/// Modelos y DTOs
+/// =============================
+
+class Usuario {
+  final int idUsuario;
+  final String username;
+  final String nombres;
+  final String apellidos;
+  final String dni;
+  final String tipoTrabajador; // nombre_tipo
+  final String estado; // "Activo" | "Inactivo"
+  bool get estaActivo => estado.toLowerCase() == 'activo';
+
+  Usuario({
+    required this.idUsuario,
+    required this.username,
+    required this.nombres,
+    required this.apellidos,
+    required this.dni,
+    required this.tipoTrabajador,
+    required this.estado,
+  });
+
+  factory Usuario.fromJson(Map<String, dynamic> j) => Usuario(
+    idUsuario: j['id_usuario'],
+    username: j['username'],
+    nombres: j['nombres'],
+    apellidos: j['apellidos'],
+    dni: j['dni'],
+    tipoTrabajador: j['tipo_trabajador'],
+    estado: j['estado'],
+  );
+}
+
+class UsuarioDetalle {
+  final int idUsuario;
+  final String username;
+  final bool estado;
+  final String nombres;
+  final String apellidos;
+  final String dni;
+  final int? idCamion;
+  final int idTipoTrabajador;
+  final String nombreTipo;
+
+  UsuarioDetalle({
+    required this.idUsuario,
+    required this.username,
+    required this.estado,
+    required this.nombres,
+    required this.apellidos,
+    required this.dni,
+    required this.idTipoTrabajador,
+    required this.nombreTipo,
+    this.idCamion,
+  });
+
+  factory UsuarioDetalle.fromJson(Map<String, dynamic> j) => UsuarioDetalle(
+    idUsuario: j['id_usuario'],
+    username: j['username'],
+    estado: j['estado'] == true || j['estado'] == 1,
+    nombres: j['nombres'],
+    apellidos: j['apellidos'],
+    dni: j['dni'],
+    idCamion: j['id_camion'],
+    idTipoTrabajador: j['id_tipo_trabajador'],
+    nombreTipo: j['nombre_tipo'],
+  );
+}
+
+class TipoTrabajador {
+  final int id;
+  final String nombre;
+  TipoTrabajador({required this.id, required this.nombre});
+  factory TipoTrabajador.fromJson(Map<String, dynamic> j) =>
+      TipoTrabajador(id: j['id_tipo_trabajador'], nombre: j['nombre_tipo']);
+}
+
+class UsuarioUpdateDto {
+  final String nombres;
+  final String apellidos;
+  final String dni;
+  final int? idCamion; // null permitido
+  final int idTipoTrabajador;
+  final String username;
+  final String? password; // opcional
+  final bool? estado; // opcional
+
+  UsuarioUpdateDto({
+    required this.nombres,
+    required this.apellidos,
+    required this.dni,
+    required this.idTipoTrabajador,
+    required this.username,
+    this.idCamion,
+    this.password,
+    this.estado,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'nombres': nombres,
+    'apellidos': apellidos,
+    'dni': dni,
+    'id_camion': idCamion, // puede ser null
+    'id_tipo_trabajador': idTipoTrabajador,
+    'username': username,
+    if (password != null && password!.isNotEmpty) 'password': password,
+    if (estado != null) 'estado': estado,
+  };
+}
+
+class UsuarioCreateDto {
+  final String nombres;
+  final String apellidos;
+  final String dni;
+  final int idTipoTrabajador;
+  final String username;
+  final String password; // requerido para crear
+  final int? idCamion; // opcional
+  final bool estado; // por defecto true
+
+  UsuarioCreateDto({
+    required this.nombres,
+    required this.apellidos,
+    required this.dni,
+    required this.idTipoTrabajador,
+    required this.username,
+    required this.password,
+    this.idCamion,
+    this.estado = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    "nombres": nombres,
+    "apellidos": apellidos,
+    "dni": dni,
+    "id_tipo_trabajador": idTipoTrabajador,
+    "id_camion": idCamion,
+    "username": username,
+    "password": password,
+    "estado": estado,
+  };
+}
+
+class Camion {
+  final int idCamion;
+  final String placa;
+  final String modelo;
+  final String marca;
+  final int capacidadMax;
+  final String estado; // "Disponible" | "No disponible"
+  bool get disponible => estado.toLowerCase().startsWith('disponible');
+
+  Camion({
+    required this.idCamion,
+    required this.placa,
+    required this.modelo,
+    required this.marca,
+    required this.capacidadMax,
+    required this.estado,
+  });
+
+  factory Camion.fromJson(Map<String, dynamic> j) => Camion(
+    idCamion: j['id_camion'],
+    placa: j['placa'],
+    modelo: j['modelo'],
+    marca: j['marca'],
+    capacidadMax: j['capacidad_max'],
+    estado: j['estado'],
+  );
+}
+
+class CamionCreateDto {
+  final String placa;
+  final String modelo;
+  final String marca;
+  final int capacidadMax;
+  final bool estado;
+
+  CamionCreateDto({
+    required this.placa,
+    required this.modelo,
+    required this.marca,
+    required this.capacidadMax,
+    this.estado = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'placa': placa,
+    'modelo': modelo,
+    'marca': marca,
+    'capacidad_max': capacidadMax,
+    'estado': estado,
+  };
+}
+
+class CamionUpdateDto {
+  final String placa;
+  final String modelo;
+  final String marca;
+  final int capacidadMax;
+  final bool estado;
+
+  CamionUpdateDto({
+    required this.placa,
+    required this.modelo,
+    required this.marca,
+    required this.capacidadMax,
+    required this.estado,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'placa': placa,
+    'modelo': modelo,
+    'marca': marca,
+    'capacidad_max': capacidadMax,
+    'estado': estado,
+  };
+}
+
+// --- MODELO ---
+class RutaResumen {
+  final int idRuta;
+  final String? fecha; // puede venir null
+  final int nPuntos;
+  final String? primerPunto;
+  final String? ultimoPunto;
+
+  RutaResumen({
+    required this.idRuta,
+    required this.fecha,
+    required this.nPuntos,
+    required this.primerPunto,
+    required this.ultimoPunto,
+  });
+
+  factory RutaResumen.fromJson(Map<String, dynamic> j) => RutaResumen(
+    idRuta: j['id_ruta'] as int,
+    fecha: j['fecha'] as String?, // null si no tiene fecha
+    nPuntos: (j['n_puntos'] ?? 0) as int,
+    primerPunto: j['primer_punto'] as String?,
+    ultimoPunto: j['ultimo_punto'] as String?,
+  );
+}
+
+class PuntoRuta {
+  final int numero;
+  final String direccion;
+  final double lat;
+  final double lng;
+  final bool visitado;
+
+  PuntoRuta({
+    required this.numero,
+    required this.direccion,
+    required this.lat,
+    required this.lng,
+    required this.visitado,
+  });
+
+  factory PuntoRuta.fromJson(Map<String, dynamic> j) => PuntoRuta(
+    numero: j['numero'],
+    direccion: j['direccion'],
+    lat: (j['lat'] as num).toDouble(),
+    lng: (j['lng'] as num).toDouble(),
+    visitado: j['visitado'] == true,
+  );
+}
+
+class ClienteInfo {
+  final String nombres;
+  final String giro;
+  final String codigo;
+
+  ClienteInfo({
+    required this.nombres,
+    required this.giro,
+    required this.codigo,
+  });
+
+  factory ClienteInfo.fromJson(Map<String, dynamic> j) =>
+      ClienteInfo(nombres: j['nombres'], giro: j['giro'], codigo: j['codigo']);
+}
+
+class PuntoRutaDet {
+  final int idPunto;
+  final int orden;
+  final bool visitado;
+  final String direccion;
+  final double latitud;
+  final double longitud;
+  final ClienteInfo cliente;
+
+  PuntoRutaDet({
+    required this.idPunto,
+    required this.orden,
+    required this.visitado,
+    required this.direccion,
+    required this.latitud,
+    required this.longitud,
+    required this.cliente,
+  });
+
+  factory PuntoRutaDet.fromJson(Map<String, dynamic> j) => PuntoRutaDet(
+    idPunto: j['id_punto'],
+    orden: j['orden'],
+    visitado: j['visitado'] == true,
+    direccion: j['direccion'],
+    latitud: (j['latitud'] as num).toDouble(),
+    longitud: (j['longitud'] as num).toDouble(),
+    cliente: ClienteInfo.fromJson(j['cliente']),
+  );
+}
+
+class RutaConPuntos {
+  final int idRuta;
+  final int nPuntos;
+  final String fecha; // "YYYY-MM-DD"
+  final String placa;
+  final List<PuntoRutaDet> puntos;
+
+  RutaConPuntos({
+    required this.idRuta,
+    required this.nPuntos,
+    required this.fecha,
+    required this.placa,
+    required this.puntos,
+  });
+
+  factory RutaConPuntos.fromJson(Map<String, dynamic> j) => RutaConPuntos(
+    idRuta: j['id_ruta'],
+    nPuntos: j['n_puntos'],
+    fecha: j['fecha'],
+    placa: j['placa'],
+    puntos: (j['puntos'] as List)
+        .cast<Map<String, dynamic>>()
+        .map(PuntoRutaDet.fromJson)
+        .toList(),
+  );
+}
+
+/// =============================
+/// Servicio de API
+/// =============================
+class ApiService {
+  /// Cambia la IP/host según tu entorno
+  final String baseUrl =
+      "http://192.168.18.9:5000/api"; // Android emulator localhost
+
+  /// =============================
+  /// Helpers internos
+  /// =============================
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString("jwt_token");
+  }
+
+  Future<Map<String, String>> _jsonHeaders({bool withAuth = true}) async {
+    final headers = <String, String>{"Content-Type": "application/json"};
+    if (withAuth) {
+      final token = await _getToken();
+      if (token == null) throw ApiException("No autenticado");
+      // OJO: tu backend espera el token sin "Bearer "
+      headers["Authorization"] = token;
+    }
+    return headers;
+  }
+
+  dynamic _decodeBody(http.Response resp) {
+    if (resp.body.isEmpty) return null;
+    try {
+      return jsonDecode(resp.body);
+    } catch (_) {
+      return resp.body;
+    }
+  }
+
+  T _handleResponse<T>(http.Response resp, T Function(dynamic json) parser) {
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      final data = _decodeBody(resp);
+      return parser(data);
+    } else {
+      final data = _decodeBody(resp);
+      final message = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : 'Error ${resp.statusCode}: ${resp.body}';
+      throw ApiException(message, statusCode: resp.statusCode);
+    }
+  }
+
+  /// =============================
+  /// Auth
+  /// =============================
   Future<Map<String, dynamic>?> login(String username, String password) async {
     try {
       final response = await http.post(
@@ -19,19 +420,21 @@ class ApiService {
         final data = jsonDecode(response.body);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString("jwt_token", data["access_token"]);
-        return data;
+        return data as Map<String, dynamic>;
       } else {
         return null;
       }
     } catch (e) {
-      throw Exception("Error de conexión: $e");
+      throw ApiException("Error de conexión: $e");
     }
   }
 
+  /// =============================
+  /// Optimización con Excel
+  /// =============================
   Future<Map<String, dynamic>> optimizeWithExcel(File file) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString("jwt_token");
-    if (token == null) throw Exception("No autenticado");
+    final token = await _getToken();
+    if (token == null) throw ApiException("No autenticado");
 
     final uri = Uri.parse("$baseUrl/optimize");
     final request = http.MultipartRequest("POST", uri);
@@ -39,6 +442,7 @@ class ApiService {
     // OJO: tu backend espera el token sin "Bearer "
     request.headers["Authorization"] = token;
 
+    // Ajusta estos fields según tus valores reales
     request.fields["sheet_name"] = "Hoja1";
     request.fields["deposito_latitude"] = "-6.7604792";
     request.fields["deposito_longitude"] = "-79.8707004";
@@ -46,46 +450,354 @@ class ApiService {
     request.fields["objetivo"] = "distancia";
     request.fields["speed_kmh"] = "30";
 
-    request.files.add(await http.MultipartFile.fromPath(
-      "file",
-      file.path,
-      contentType: MediaType(
-        "application",
-        "vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        file.path,
+        contentType: MediaType(
+          "application",
+          "vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
       ),
-    ));
+    );
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      throw Exception("Error ${response.statusCode}: ${response.body}");
-    }
+    return _handleResponse<Map<String, dynamic>>(
+      response,
+      (json) => json as Map<String, dynamic>,
+    );
   }
 
-  /// 🔹 Guarda rutas optimizadas en el backend
-  /// Espera un payload con forma: { "resultados": [ { "placa": "...", "rutas": [ { "nombre": "...", "puntos": [...] } ] } ] }
-  Future<Map<String, dynamic>> guardarRutas(Map<String, dynamic> payload) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString("jwt_token");
-    if (token == null) throw Exception("No autenticado");
+  /// Guarda rutas optimizadas en el backend
+  Future<Map<String, dynamic>> guardarRutas(
+    Map<String, dynamic> payload,
+  ) async {
+    final uri = Uri.parse("$baseUrl/guardar-rutas");
+    final headers = await _jsonHeaders(withAuth: true); // token_required activo
 
     final resp = await http.post(
-      Uri.parse("$baseUrl/guardar-rutas"),
-      headers: {
-        "Content-Type": "application/json",
-        // OJO: tu backend espera el token sin "Bearer "
-        "Authorization": token,
-      },
+      uri,
+      headers: headers,
       body: jsonEncode(payload),
     );
 
-    if (resp.statusCode == 201 || resp.statusCode == 200) {
-      return jsonDecode(resp.body) as Map<String, dynamic>;
-    } else {
-      throw Exception("Error ${resp.statusCode}: ${resp.body}");
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      // convierte a ApiException con mensaje claro
+      final data = _decodeBody(resp);
+      final msg = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : 'Sesión expirada o no autorizada';
+      throw ApiException(msg, statusCode: resp.statusCode);
+    }
+
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => json as Map<String, dynamic>,
+    );
+  }
+
+  Future<Map<String, dynamic>?> recalcularRuta(
+    List<Map<String, double>> puntos,
+  ) async {
+    try {
+      final url = Uri.parse("$baseUrl/recalcular_ruta");
+      final response = await http.post(
+        url,
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({"puntos": puntos}),
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        return null;
+      }
+    } catch (e) {
+      return null;
     }
   }
+
+  /// =============================
+  /// USUARIOS
+  /// =============================
+
+  Future<List<Usuario>> listarUsuarios() async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/usuarios"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<List<Usuario>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(Usuario.fromJson).toList();
+    });
+  }
+
+  Future<Map<String, dynamic>> registrarUsuario(UsuarioCreateDto dto) async {
+    final resp = await http.post(
+      Uri.parse("$baseUrl/register"),
+      headers: await _jsonHeaders(), // incluye Authorization sin "Bearer "
+      body: jsonEncode(dto.toJson()),
+    );
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => json as Map<String, dynamic>,
+    );
+  }
+
+  Future<String> eliminarUsuario(int idUsuario) async {
+    final resp = await http.delete(
+      Uri.parse("$baseUrl/usuarios/$idUsuario"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<String>(resp, (json) {
+      if (json is Map && json['message'] != null) return json['message'];
+      return 'OK';
+    });
+  }
+
+  Future<String> actualizarUsuario(int idUsuario, UsuarioUpdateDto data) async {
+    final resp = await http.put(
+      Uri.parse("$baseUrl/usuarios/$idUsuario"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(data.toJson()),
+    );
+    return _handleResponse<String>(resp, (json) {
+      if (json is Map && json['message'] != null) return json['message'];
+      return 'Usuario actualizado';
+    });
+  }
+
+  Future<UsuarioDetalle> obtenerUsuarioDetalle(int idUsuario) async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/usuarios/$idUsuario"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<UsuarioDetalle>(
+      resp,
+      (json) => UsuarioDetalle.fromJson(json),
+    );
+  }
+
+  Future<List<TipoTrabajador>> listarTiposTrabajador() async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/tipos-trabajador"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<List<TipoTrabajador>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(TipoTrabajador.fromJson).toList();
+    });
+  }
+
+  Future<List<Camion>> listarCamionesDisponibles({int? includeId}) async {
+    final uri = includeId == null
+        ? Uri.parse("$baseUrl/camiones/disponibles")
+        : Uri.parse("$baseUrl/camiones/disponibles?include_id=$includeId");
+
+    final resp = await http.get(uri, headers: await _jsonHeaders());
+    return _handleResponse<List<Camion>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(Camion.fromJson).toList();
+    });
+  }
+
+  /// =============================
+  /// CAMIONES (CRUD)
+  /// =============================
+
+  Future<List<Camion>> listarCamiones() async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/camiones"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<List<Camion>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(Camion.fromJson).toList();
+    });
+  }
+
+  /// Devuelve un pequeño “ref” con id_camion y placa desde la respuesta 201
+  Future<Map<String, dynamic>> crearCamion(CamionCreateDto data) async {
+    final resp = await http.post(
+      Uri.parse("$baseUrl/camiones"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(data.toJson()),
+    );
+    return _handleResponse<Map<String, dynamic>>(resp, (json) {
+      return (json as Map<String, dynamic>);
+    });
+  }
+
+  Future<String> eliminarCamion(int idCamion) async {
+    final resp = await http.delete(
+      Uri.parse("$baseUrl/camiones/$idCamion"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<String>(resp, (json) {
+      if (json is Map && json['message'] != null) return json['message'];
+      return 'OK';
+    });
+  }
+
+  Future<String> actualizarCamion(int idCamion, CamionUpdateDto data) async {
+    final resp = await http.put(
+      Uri.parse("$baseUrl/camiones/$idCamion"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(data.toJson()),
+    );
+    return _handleResponse<String>(resp, (json) {
+      if (json is Map && json['message'] != null) return json['message'];
+      return 'Camión actualizado';
+    });
+  }
+
+  /// =============================
+  /// RUTAS
+  /// =============================
+
+  Future<List<RutaResumen>> listarRutas() async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/rutas"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<List<RutaResumen>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(RutaResumen.fromJson).toList();
+    });
+  }
+
+  Future<List<PuntoRuta>> listarPuntosDeRuta(int idRuta) async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<List<PuntoRuta>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(PuntoRuta.fromJson).toList();
+    });
+  }
+
+  Future<String> eliminarRuta(int idRuta) async {
+    final resp = await http.delete(
+      Uri.parse("$baseUrl/rutas/$idRuta"),
+      headers: await _jsonHeaders(),
+    );
+    return _handleResponse<String>(resp, (json) {
+      if (json is Map && json['message'] != null) return json['message'];
+      return 'Ruta dada de baja';
+    });
+  }
+
+  Future<List<RutaResumen>> listarRutasPorCamion(int idCamion) async {
+    final uri = Uri.parse("$baseUrl/camiones/$idCamion/rutas");
+    final resp = await http
+        .get(uri, headers: await _jsonHeaders())
+        .timeout(const Duration(seconds: 12));
+    return _handleResponse<List<RutaResumen>>(resp, (json) {
+      final list = (json as List).cast<Map<String, dynamic>>();
+      return list.map(RutaResumen.fromJson).toList();
+    });
+  }
+
+  Future<Map<String, dynamic>> actualizarFechaRuta({
+    required int idRuta,
+    DateTime? fecha, // null = quitar fecha
+  }) async {
+    final uri = Uri.parse("$baseUrl/rutas/$idRuta/fecha");
+
+    String? fechaStr;
+    if (fecha != null) {
+      final y = fecha.year.toString().padLeft(4, '0');
+      final m = fecha.month.toString().padLeft(2, '0');
+      final d = fecha.day.toString().padLeft(2, '0');
+      fechaStr = "$y-$m-$d"; // YYYY-MM-DD
+    } else {
+      fechaStr = null; // explícitamente null para eliminar fecha
+    }
+
+    final resp = await http
+        .put(
+          uri,
+          headers:
+              await _jsonHeaders(), // incluye Authorization (sin "Bearer ")
+          body: jsonEncode({"fecha": fechaStr}),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => (json as Map<String, dynamic>),
+    );
+  }
+
+  /// GET /api/rutas/puntos?id_camion=..&fecha=YYYY-MM-DD
+  Future<RutaConPuntos> obtenerPuntosRuta({
+    required String placa,
+    required DateTime fecha,
+  }) async {
+    final y = fecha.year.toString().padLeft(4, '0');
+    final m = fecha.month.toString().padLeft(2, '0');
+    final d = fecha.day.toString().padLeft(2, '0');
+    final qs = "placa=$placa&fecha=$y-$m-$d";
+
+    final resp = await http.get(
+      Uri.parse("$baseUrl/rutas/puntos?$qs"),
+      headers: await _jsonHeaders(), // incluye Authorization (tu token JWT)
+    );
+
+    return _handleResponse<RutaConPuntos>(
+      resp,
+      (json) => RutaConPuntos.fromJson(json),
+    );
+  }
+
+Future<Map<String, dynamic>> marcarVisita({
+  required int idPunto,
+  required bool entregado, // true -> "si", false -> "no"
+}) async {
+  final uri = Uri.parse("$baseUrl/ruta-punto/visitar");
+
+  final resp = await http.put(
+    uri,
+    headers: await _jsonHeaders(withAuth: true), // token_required
+    body: jsonEncode({
+      "id_punto": idPunto,
+      "respuesta": entregado ? "si" : "no",
+    }),
+  );
+
+  return _handleResponse<Map<String, dynamic>>(
+    resp,
+    (json) => json as Map<String, dynamic>,
+  );
 }
+  Future<Map<String, dynamic>> obtenerReportes({
+    required int idCamion,
+    required DateTime fechaInicio,
+    required DateTime fechaFin,
+  }) async {
+    final fi = _fmt(fechaInicio);
+    final ff = _fmt(fechaFin);
+
+    final uri = Uri.parse(
+      '$baseUrl/reportes?id_camion=$idCamion&fecha_inicio=$fi&fecha_fin=$ff',
+    );
+
+    final resp = await http.get(uri, headers: await _jsonHeaders());
+    if (resp.statusCode == 200) {
+      return json.decode(resp.body) as Map<String, dynamic>;
+    } else {
+      throw ApiException('Error ${resp.statusCode}: ${resp.body}');
+    }
+  }
+
+  // ✅ ESTE es el método que te faltaba:
+  String _fmt(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+}
+

@@ -1,6 +1,6 @@
-import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 
 class ReportesPage extends StatefulWidget {
   const ReportesPage({super.key});
@@ -10,276 +10,494 @@ class ReportesPage extends StatefulWidget {
 }
 
 class _ReportesPageState extends State<ReportesPage> {
-  // ======== Filtro ========
-  int _rangeDays = 7; // 7 | 30 | 90
+  final _api = ApiService();
 
-  // ======== Mock de datos ========
-  late final List<RutaMock> _rutas = _genRutasMock(120);
-  late List<RutaMock> _rutasFiltradas;
+  // ====== Estado filtro ======
+  List<Camion> _camiones = [];
+  Camion? _camionSel;
+
+  // Fechas (DatePicker)
+  DateTime? _fechaInicio;
+  DateTime? _fechaFin;
+
+  bool _cargandoInit = true;
+  bool _cargandoConsulta = false;
+
+  // ====== Datos API ======
+  List<_RutaFecha> _rutasPorFecha = [];
+  List<_ParNombreValor> _rutasPorEstado = [];
+  List<_ParNombreValor> _puntosPorVisita = [];
 
   @override
   void initState() {
     super.initState();
-    _aplicarFiltro();
+    _initCargar();
   }
 
-  void _aplicarFiltro() {
-    final hoy = DateTime.now();
-    final hoyOnly = DateUtils.dateOnly(hoy);
-    final desde = hoyOnly.subtract(Duration(days: _rangeDays - 1));
-    _rutasFiltradas = _rutas.where((r) {
-      final d = DateUtils.dateOnly(r.fecha);
-      return !d.isBefore(desde) && !d.isAfter(hoyOnly);
-    }).toList();
-    setState(() {});
-  }
+  Future<void> _initCargar() async {
+    try {
+      // Fechas por defecto: últimos 7 días
+      final hoy = DateTime.now();
+      final hoyOnly = DateTime(hoy.year, hoy.month, hoy.day);
+      final desde = hoyOnly.subtract(const Duration(days: 6));
 
-  // ======== Agregaciones ========
-  List<DailyCount> _rutasPorDia() {
-    final map = <DateTime, int>{};
-    for (var r in _rutasFiltradas) {
-      final key = DateUtils.dateOnly(r.fecha);
-      map[key] = (map[key] ?? 0) + 1;
-    }
-    final hoy = DateTime.now();
-    final hoyOnly = DateUtils.dateOnly(hoy);
-    final desde = hoyOnly.subtract(Duration(days: _rangeDays - 1));
-    final res = <DailyCount>[];
-    for (int i = 0; i < _rangeDays; i++) {
-      final d = DateUtils.dateOnly(desde.add(Duration(days: i)));
-      res.add(DailyCount(d, map[d] ?? 0));
-    }
-    return res;
-  }
+      _fechaInicio = desde;
+      _fechaFin = hoyOnly;
 
-  PointsSummary _puntosVisitadosPendientes() {
-    int visitados = 0;
-    int pendientes = 0;
-    for (var r in _rutasFiltradas) {
-      visitados += r.puntosVisitados;
-      pendientes += r.puntosPendientes;
-    }
-    return PointsSummary(visitados: visitados, pendientes: pendientes);
-  }
-
-  RouteStateSummary _estadoRutas() {
-    int activas = 0, inactivas = 0;
-    for (var r in _rutasFiltradas) {
-      if (r.activa) {
-        activas++;
-      } else {
-        inactivas++;
+      // Camiones
+      _camiones = await _api.listarCamiones();
+      if (_camiones.isNotEmpty) _camionSel = _camiones.first;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error inicializando: $e')),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _cargandoInit = false);
     }
-    return RouteStateSummary(activas: activas, inactivas: inactivas);
   }
 
-  // ======== UI ========
+  Future<void> _consultar() async {
+    if (_camionSel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona un camión')),
+      );
+      return;
+    }
+    if (_fechaInicio == null || _fechaFin == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona ambas fechas')),
+      );
+      return;
+    }
+
+    // Normaliza a rango máximo de 7 días (inclusive)
+    var fi = DateTime(_fechaInicio!.year, _fechaInicio!.month, _fechaInicio!.day);
+    var ff = DateTime(_fechaFin!.year, _fechaFin!.month, _fechaFin!.day);
+    if (fi.isAfter(ff)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La fecha de inicio no puede ser mayor que la fecha fin')),
+      );
+      return;
+    }
+    final diff = ff.difference(fi).inDays;
+    if (diff > 6) {
+      // Ajusta a los últimos 7 días: [ff-6, ff]
+      final fiAdj = ff.subtract(const Duration(days: 6));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El rango máximo es 7 días. Se ajustó automáticamente.')),
+      );
+      setState(() {
+        _fechaInicio = fiAdj;
+      });
+      fi = fiAdj;
+    }
+
+    setState(() => _cargandoConsulta = true);
+    try {
+      final json = await _api.obtenerReportes(
+        idCamion: _camionSel!.idCamion,
+        fechaInicio: fi,
+        fechaFin: ff,
+      );
+
+      _rutasPorFecha = (json['rutas_por_fecha'] as List? ?? [])
+          .map((e) => _RutaFecha.fromJson(e))
+          .toList()
+        ..sort((a, b) => a.fecha.compareTo(b.fecha));
+
+      _rutasPorEstado = (json['rutas_por_estado'] as List? ?? [])
+          .map((e) => _ParNombreValor(
+                nombre: (e['estado'] ?? '').toString(),
+                valor: (e['cantidad_rutas'] ?? 0) as int,
+              ))
+          .toList();
+
+      _puntosPorVisita = (json['puntos_por_visita'] as List? ?? [])
+          .map((e) => _ParNombreValor(
+                nombre: (e['estado_visita'] ?? '').toString(),
+                valor: (e['cantidad_puntos'] ?? 0) as int,
+              ))
+          .toList();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error consultando: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cargandoConsulta = false);
+    }
+  }
+
+  // ====== UI ======
   @override
   Widget build(BuildContext context) {
-    final rutasDia = _rutasPorDia();
-    final points = _puntosVisitadosPendientes();
-    final estados = _estadoRutas();
+    if (_cargandoInit) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reportes'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                value: _rangeDays,
-                items: const [
-                  DropdownMenuItem(value: 7, child: Text('7 días')),
-                  DropdownMenuItem(value: 30, child: Text('30 días')),
-                  DropdownMenuItem(value: 90, child: Text('90 días')),
-                ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  _rangeDays = v;
-                  _aplicarFiltro();
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Reportes')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _SectionCard(
-            title: 'Rutas por día',
-            subtitle: 'Cantidad de rutas registradas en el período',
-            child: SizedBox(
-              height: 220,
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(show: true),
-                  borderData: FlBorderData(show: true),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= rutasDia.length) return const SizedBox();
-                          final d = rutasDia[idx].date;
-                          return Text('${d.day}/${d.month}', style: const TextStyle(fontSize: 10));
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 28,
-                        getTitlesWidget: (value, meta) =>
-                            Text(value.toInt().toString(), style: const TextStyle(fontSize: 10)),
-                      ),
+      
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Filtros', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 12),
+
+                  // Camión
+                  _ComboCamion(
+                    camiones: _camiones,
+                    value: _camionSel,
+                    onChanged: (c) => setState(() => _camionSel = c),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Fecha inicio
+                  _DatePickerField(
+                    label: 'Fecha inicio',
+                    value: _fechaInicio,
+                    onChanged: (d) => setState(() => _fechaInicio = d),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Fecha fin
+                  _DatePickerField(
+                    label: 'Fecha fin',
+                    value: _fechaFin,
+                    onChanged: (d) => setState(() => _fechaFin = d),
+                  ),
+
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton.icon(
+                      onPressed: _cargandoConsulta ? null : _consultar,
+                      icon: const Icon(Icons.search),
+                      label: _cargandoConsulta
+                          ? const Text('Consultando...')
+                          : const Text('Consultar'),
                     ),
                   ),
-                  lineBarsData: [
-                    LineChartBarData(
-                      isCurved: true,
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                      spots: List.generate(
-                        rutasDia.length,
-                        (i) => FlSpot(i.toDouble(), rutasDia[i].count.toDouble()),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
           const SizedBox(height: 16),
-          _SectionCard(
-            title: 'Puntos visitados vs. pendientes',
-            subtitle: 'Suma total de puntos en el período',
-            child: SizedBox(
-              height: 220,
-              child: BarChart(
-                BarChartData(
-                  gridData: FlGridData(show: true),
-                  borderData: FlBorderData(show: false),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          switch (value.toInt()) {
-                            case 0: return const Text('Visitados');
-                            case 1: return const Text('Pendientes');
-                            default: return const SizedBox();
-                          }
-                        },
+
+          if (_rutasPorFecha.isEmpty &&
+              _rutasPorEstado.isEmpty &&
+              _puntosPorVisita.isEmpty)
+            const Center(child: Text('Sin datos (ajusta filtros y consulta).')),
+
+          if (_rutasPorFecha.isNotEmpty)
+            _SectionCard(
+              title: 'Rutas por día',
+              subtitle: 'Cantidad de rutas por fecha (máx. 7 días)',
+              child: SizedBox(
+                height: 220,
+                child: _buildBarChartRutasPorDia(),
+              ),
+            ),
+
+          if (_puntosPorVisita.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              title: 'Puntos visitados vs. no visitados',
+              subtitle: 'Suma de puntos en el período',
+              child: SizedBox(
+                height: 220,
+                child: BarChart(
+                  BarChartData(
+                    gridData: FlGridData(show: true),
+                    borderData: FlBorderData(show: false),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            final i = value.toInt();
+                            if (i < 0 || i >= _puntosPorVisita.length) return const SizedBox();
+                            return Text(_puntosPorVisita[i].nombre, style: const TextStyle(fontSize: 10));
+                          },
+                        ),
+                      ),
+                    ),
+                    barGroups: List.generate(
+                      _puntosPorVisita.length,
+                      (i) => BarChartGroupData(
+                        x: i,
+                        barRods: [BarChartRodData(toY: _puntosPorVisita[i].valor.toDouble())],
                       ),
                     ),
                   ),
-                  barGroups: [
-                    BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: points.visitados.toDouble())]),
-                    BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: points.pendientes.toDouble())]),
-                  ],
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          _SectionCard(
-            title: 'Estado de rutas',
-            subtitle: 'Distribución de rutas activas/inactivas',
-            child: SizedBox(
-              height: 220,
-              child: PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 36,
-                  sections: [
-                    PieChartSectionData(
-                      value: estados.activas.toDouble(),
-                      title: 'Activas\n${estados.activas}',
-                      radius: 70,
-                    ),
-                    PieChartSectionData(
-                      value: estados.inactivas.toDouble(),
-                      title: 'Inactivas\n${estados.inactivas}',
-                      radius: 70,
-                    ),
-                  ],
+          ],
+
+          if (_rutasPorEstado.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              title: 'Estado de rutas',
+              subtitle: 'Activas vs. Inactivas',
+              child: SizedBox(
+                height: 220,
+                child: PieChart(
+                  PieChartData(
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 36,
+                    sections: _rutasPorEstado
+                        .map(
+                          (e) => PieChartSectionData(
+                            value: e.valor.toDouble(),
+                            title: '${e.nombre}\n${e.valor}',
+                            radius: 70,
+                          ),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  // ===================== Helpers Mock (en el mismo archivo) =====================
-  List<RutaMock> _genRutasMock(int diasAtras) {
-    final rand = Random(1);
-    final hoy = DateTime.now();
-    final base = DateTime(hoy.year, hoy.month, hoy.day);
-    final rutas = <RutaMock>[];
-    for (int d = 0; d < diasAtras; d++) {
-      final fecha = base.subtract(Duration(days: d));
-      final rutasHoy = rand.nextInt(7); // 0..6 rutas por día
-      for (int i = 0; i < rutasHoy; i++) {
-        final totalPuntos = 40 + rand.nextInt(20); // 40..59
-        final visitados = rand.nextInt(totalPuntos + 1);
-        rutas.add(
-          RutaMock(
-            fecha: fecha,
-            activa: rand.nextBool(),
-            puntosVisitados: visitados,
-            puntosPendientes: totalPuntos - visitados,
-          ),
-        );
-      }
+
+  List<_RutaFecha> _serieRutasMax7Dias() {
+    if (_fechaInicio == null || _fechaFin == null || _rutasPorFecha.isEmpty) {
+      return [];
     }
-    return rutas;
+    // Asegura rango 0..6
+    final ff = DateTime(_fechaFin!.year, _fechaFin!.month, _fechaFin!.day);
+    final fi = DateTime(_fechaInicio!.year, _fechaInicio!.month, _fechaInicio!.day);
+    final days = ff.difference(fi).inDays;
+    final start = days > 6 ? ff.subtract(const Duration(days: 6)) : fi;
+    final end = ff;
+
+    int countForDay(DateTime d) {
+      for (final r in _rutasPorFecha) {
+        if (DateUtils.isSameDay(r.fecha, d)) return r.cantidad;
+      }
+      return 0;
+    }
+
+    final res = <_RutaFecha>[];
+    for (int i = 0; i <= end.difference(start).inDays; i++) {
+      final d = DateTime(start.year, start.month, start.day + i);
+      res.add(_RutaFecha(fecha: d, cantidad: countForDay(d)));
+    }
+    return res;
+  }
+
+  String _ddmm(DateTime d) {
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    return '$dd/$mm';
+  }
+
+  Widget _buildBarChartRutasPorDia() {
+    final serie = _serieRutasMax7Dias();
+    final n = serie.length;
+
+    return BarChart(
+      BarChartData(
+        gridData: FlGridData(show: true),
+        borderData: FlBorderData(show: false),
+        minY: 0,
+        titlesData: FlTitlesData(
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              getTitlesWidget: (value, meta) {
+                final i = value.toInt();
+                if (i < 0 || i >= n) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(_ddmm(serie[i].fecha), style: const TextStyle(fontSize: 10)),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 28,
+              getTitlesWidget: (value, meta) =>
+                  Text(value.toInt().toString(), style: const TextStyle(fontSize: 10)),
+            ),
+          ),
+        ),
+        barGroups: List.generate(
+          n,
+          (i) => BarChartGroupData(
+            x: i,
+            barRods: [BarChartRodData(toY: serie[i].cantidad.toDouble())],
+          ),
+        ),
+      ),
+    );
   }
 }
 
-// ===================== Modelos simples (en el mismo archivo) =====================
-class RutaMock {
-  final DateTime fecha;
-  final bool activa;
-  final int puntosVisitados;
-  final int puntosPendientes;
-  RutaMock({
-    required this.fecha,
-    required this.activa,
-    required this.puntosVisitados,
-    required this.puntosPendientes,
+// ===================== Widgets filtros =====================
+class _ComboCamion extends StatelessWidget {
+  final List<Camion> camiones;
+  final Camion? value;
+  final ValueChanged<Camion?> onChanged;
+  const _ComboCamion({
+    required this.camiones,
+    required this.value,
+    required this.onChanged,
   });
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<Camion>(
+      decoration: const InputDecoration(
+        labelText: 'Camión',
+        border: OutlineInputBorder(),
+      ),
+      isExpanded: true,
+      value: value,
+      items: camiones
+          .map(
+            (c) => DropdownMenuItem(
+              value: c,
+              child: Text(c.placa),
+            ),
+          )
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
 }
 
-class DailyCount {
-  final DateTime date;
-  final int count;
-  DailyCount(this.date, this.count);
+/// Campo de fecha en Card con CalendarDatePicker (DD-MM-AAAA)
+class _DatePickerField extends StatelessWidget {
+  final String label;
+  final DateTime? value;
+  final ValueChanged<DateTime> onChanged;
+  const _DatePickerField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  String _fmt(DateTime? d) {
+    if (d == null) return '';
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    return '$dd-$mm-${d.year}';
+  }
+
+  void _showPicker(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Seleccionar $label'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: CalendarDatePicker(
+            initialDate: value ?? DateTime.now(),
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2030),
+            onDateChanged: (d) {
+              onChanged(DateTime(d.year, d.month, d.day));
+              Navigator.pop(context);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = TextEditingController(text: _fmt(value));
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: controller,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      hintText: 'DD-MM-AAAA',
+                    ),
+                    readOnly: true,
+                    onTap: () => _showPicker(context),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  icon: Icon(Icons.calendar_today, color: Theme.of(context).colorScheme.primary),
+                  onPressed: () => _showPicker(context),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class PointsSummary {
-  final int visitados;
-  final int pendientes;
-  PointsSummary({required this.visitados, required this.pendientes});
+// ===================== Modelos de parseo para la vista =====================
+class _RutaFecha {
+  final DateTime fecha;
+  final int cantidad;
+  _RutaFecha({required this.fecha, required this.cantidad});
+
+  factory _RutaFecha.fromJson(Map<String, dynamic> j) {
+    final f = (j['fecha'] ?? '').toString(); // "YYYY-MM-DD"
+    final parts = f.split('-').map((e) => int.tryParse(e) ?? 1).toList();
+    final dt = DateTime(parts[0], parts[1], parts[2]);
+    return _RutaFecha(
+      fecha: dt,
+      cantidad: (j['cantidad_rutas'] ?? 0) as int,
+    );
+  }
 }
 
-class RouteStateSummary {
-  final int activas;
-  final int inactivas;
-  RouteStateSummary({required this.activas, required this.inactivas});
+class _ParNombreValor {
+  final String nombre;
+  final int valor;
+  _ParNombreValor({required this.nombre, required this.valor});
 }
 
-// ===================== UI Helper (mismo archivo) =====================
+// ===================== UI Helper =====================
 class _SectionCard extends StatelessWidget {
   final String title;
   final String subtitle;

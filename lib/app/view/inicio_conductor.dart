@@ -1,9 +1,15 @@
-// lib/app/view/inicio_conductor.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/app/view/mostrar_ruta_conductor.dart';
 
 class InicioConductor extends StatelessWidget {
   final String nombre;
-  const InicioConductor({super.key, required this.nombre});
+  final String? placa;
+
+  const InicioConductor({
+    super.key,
+    required this.nombre,
+    this.placa,
+  });
 
   String _fechaHoy() {
     final now = DateTime.now();
@@ -15,12 +21,13 @@ class InicioConductor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final placaText = placa == null || placa!.isEmpty ? '— sin camión —' : placa!;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // header...
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -31,7 +38,7 @@ class InicioConductor extends StatelessWidget {
                   Text(nombre, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ],
               ),
-              const Text("Camión N° 2", style: TextStyle(fontSize: 16)),
+              Text("Placa: $placaText", style: const TextStyle(fontSize: 16)),
             ],
           ),
           const SizedBox(height: 30),
@@ -41,8 +48,19 @@ class InicioConductor extends StatelessWidget {
           Center(
             child: ElevatedButton(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Ruta asignada en construcción 🚚")),
+                if (placa == null || placa!.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("No tienes camión asignado.")),
+                  );
+                  return;
+                }
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => RoutePreviewScreen(
+                      placa: placa!,                 // la que muestras arriba
+                      fecha: DateTime.now(),         // hoy
+                    ),
+                  ),
                 );
               },
               style: ElevatedButton.styleFrom(

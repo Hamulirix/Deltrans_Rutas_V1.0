@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 
 class AsignarRutasPage extends StatefulWidget {
   const AsignarRutasPage({super.key});
@@ -8,104 +9,167 @@ class AsignarRutasPage extends StatefulWidget {
 }
 
 class _AsignarRutasPageState extends State<AsignarRutasPage> {
-  // Listas de datos
-  final List<Map<String, dynamic>> _rutas = [
-    {
-      'id': '1',
-      'nombre': 'Ruta 1',
-      'puntos': 25,
-      'primerPunto': 'Almacén Central',
-      'ultimoPunto': 'Centro Comercial',
-    },
-    {
-      'id': '2',
-      'nombre': 'Ruta 25',
-      'puntos': 30,
-      'primerPunto': 'Planta de Producción',
-      'ultimoPunto': 'Zona Industrial',
-    },
-    {
-      'id': '3',
-      'nombre': 'Ruta 3',
-      'puntos': 20,
-      'primerPunto': 'Depósito Norte',
-      'ultimoPunto': 'Distrito Comercial',
-    }
-  ];
+  final _api = ApiService();
 
-  final List<Map<String, dynamic>> _camiones = [
-    {
-      'id': '1',
-      'placa': 'Placa 1',
-      'puntosMin': 25,
-      'puntosMax': 30,
-    },
-    {
-      'id': '2',
-      'placa': 'Placa 2',
-      'puntosMin': 15,
-      'puntosMax': 25,
-    },
-    {
-      'id': '3',
-      'placa': 'Placa 3',
-      'puntosMin': 30,
-      'puntosMax': 40,
-    }
-  ];
+  // Datos reales
+  List<Camion> _camiones = [];
+  List<RutaResumen> _rutas = [];
 
-  // Variables para selección
-  String? _rutaSeleccionada;
-  String? _camionSeleccionado;
-  DateTime? _fechaSeleccionada;
+  // Selección
+  int? _camionSeleccionado; // id_camion
+  int? _rutaSeleccionada; // id_ruta
+  DateTime? _fechaSeleccionada = DateTime.now();
 
-  // Variables para puntos de la ruta seleccionada
-  String? _primerPunto;
-  String? _ultimoPunto;
+  // UI
+  bool _loadingCamiones = false;
+  bool _loadingRutas = false;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _fechaSeleccionada = DateTime.now();
+    _cargarCamiones();
+  }
+
+  Future<void> _cargarCamiones() async {
+    setState(() => _loadingCamiones = true);
+    try {
+      final lista = await _api.listarCamiones();
+      setState(() {
+        _camiones = lista;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _loadingCamiones = false);
+    }
+  }
+
+  Future<void> _cargarRutasDeCamion(int idCamion) async {
+    setState(() {
+      _loadingRutas = true;
+      _rutas = [];
+      _rutaSeleccionada = null;
+    });
+    try {
+      final lista = await _api.listarRutasPorCamion(idCamion);
+      setState(() => _rutas = lista);
+      if (lista.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este camión no tiene rutas pendientes.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _loadingRutas = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final rutaSel = _rutas
+        .where((r) => r.idRuta == _rutaSeleccionada)
+        .cast<RutaResumen?>()
+        .firstOrNull;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Programación de rutas'),
-      ),
+      resizeToAvoidBottomInset: true,
+      appBar: AppBar(title: const Text('Programación de rutas')),
       body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Programación de rutas',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 30),
+
+              _buildSeccionCamiones(),
+              const SizedBox(height: 20),
+
+              _buildSeccionRutas(),
+              const SizedBox(height: 20),
+
+              if (rutaSel != null) _buildSeccionPuntos(rutaSel),
+              if (rutaSel != null) const SizedBox(height: 20),
+
+              _buildSelectorFecha(),
+              const SizedBox(height: 30),
+
+              _buildBotonAsignar(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ================= Secciones =================
+
+  Widget _buildSeccionCamiones() {
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Programación de rutas',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+              'Camión',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 15),
 
-            // Sección de rutas
-            _buildSeccionRutas(),
-            const SizedBox(height: 20),
-
-            if (_rutaSeleccionada != null) _buildSeccionPuntos(),
-            if (_rutaSeleccionada != null) const SizedBox(height: 20),
-
-            // Sección de camiones
-            _buildSeccionCamiones(),
-            const SizedBox(height: 20),
-
-            // Selector de fecha
-            _buildSelectorFecha(),
-            const SizedBox(height: 30),
-
-            // Botón de asignar
-            _buildBotonAsignar(),
+            if (_loadingCamiones)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else
+              DropdownButtonFormField<int>(
+                value: _camionSeleccionado,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                ),
+                items: _camiones
+                    .map(
+                      (c) => DropdownMenuItem<int>(
+                        value: c.idCamion,
+                        child: Text('${c.placa} • ${c.marca} ${c.modelo}'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _camionSeleccionado = value;
+                  });
+                  if (value != null) {
+                    _cargarRutasDeCamion(value);
+                  }
+                },
+                hint: const Text('Selecciona un camión'),
+              ),
           ],
         ),
       ),
@@ -126,38 +190,46 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 15),
-            DropdownButtonFormField<String>(
-              value: _rutaSeleccionada,
-              decoration: InputDecoration(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+
+            if (_camionSeleccionado == null)
+              const Text('Elige un camión para ver sus rutas pendientes.')
+            else if (_loadingRutas)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: CircularProgressIndicator(),
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              )
+            else
+              DropdownButtonFormField<int>(
+                value: _rutaSeleccionada,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                ),
+                items: _rutas
+                    .map(
+                      (r) => DropdownMenuItem<int>(
+                        value: r.idRuta,
+                        child: Text('Ruta #${r.idRuta} • ${r.nPuntos} puntos'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) => setState(() => _rutaSeleccionada = value),
+                hint: const Text('Selecciona una ruta'),
               ),
-              items: _rutas.map((ruta) {
-                return DropdownMenuItem<String>(
-                  value: ruta['id'],
-                  child: Text('${ruta['nombre']} - ${ruta['puntos']} puntos'),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _rutaSeleccionada = value;
-                  final ruta = _rutas.firstWhere((r) => r['id'] == value);
-                  _primerPunto = ruta['primerPunto'];
-                  _ultimoPunto = ruta['ultimoPunto'];
-                });
-              },
-              hint: const Text('Selecciona una ruta'),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSeccionPuntos() {
+  Widget _buildSeccionPuntos(RutaResumen r) {
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -171,12 +243,11 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 15),
-            if (_primerPunto != null) ...[
-              _buildItemPunto('Primer punto', _primerPunto!),
-              const SizedBox(height: 10),
-            ],
-            if (_ultimoPunto != null)
-              _buildItemPunto('Último punto', _ultimoPunto!),
+            if (r.primerPunto != null)
+              _buildItemPunto('Primer punto', r.primerPunto!),
+            if (r.primerPunto != null) const SizedBox(height: 10),
+            if (r.ultimoPunto != null)
+              _buildItemPunto('Último punto', r.ultimoPunto!),
           ],
         ),
       ),
@@ -201,50 +272,13 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
     );
   }
 
-  Widget _buildSeccionCamiones() {
-    return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Camión',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 15),
-            DropdownButtonFormField<String>(
-              value: _camionSeleccionado,
-              decoration: InputDecoration(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
-              items: _camiones.map((camion) {
-                return DropdownMenuItem<String>(
-                  value: camion['id'],
-                  child: Text(
-                      '${camion['placa']} - ${camion['puntosMin']} a ${camion['puntosMax']} puntos'),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _camionSeleccionado = value;
-                });
-              },
-              hint: const Text('Selecciona un camión'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildSelectorFecha() {
+    final text = _fechaSeleccionada == null
+        ? ''
+        : '${_fechaSeleccionada!.day.toString().padLeft(2, '0')}-'
+              '${_fechaSeleccionada!.month.toString().padLeft(2, '0')}-'
+              '${_fechaSeleccionada!.year}';
+
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -262,17 +296,15 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
               children: [
                 Expanded(
                   child: TextFormField(
-                    controller: TextEditingController(
-                      text: _fechaSeleccionada != null
-                          ? '${_fechaSeleccionada!.day.toString().padLeft(2, '0')}-${_fechaSeleccionada!.month.toString().padLeft(2, '0')}-${_fechaSeleccionada!.year}'
-                          : '',
-                    ),
+                    controller: TextEditingController(text: text),
                     decoration: InputDecoration(
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       hintText: 'DD-MM-AAAA',
                     ),
                     readOnly: true,
@@ -281,8 +313,10 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
                 ),
                 const SizedBox(width: 10),
                 IconButton(
-                  icon: Icon(Icons.calendar_today,
-                      color: Theme.of(context).colorScheme.primary),
+                  icon: Icon(
+                    Icons.calendar_today,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   onPressed: _mostrarSelectorFechaSimple,
                 ),
               ],
@@ -305,9 +339,7 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
             firstDate: DateTime(2020),
             lastDate: DateTime(2030),
             onDateChanged: (DateTime value) {
-              setState(() {
-                _fechaSeleccionada = value;
-              });
+              setState(() => _fechaSeleccionada = value);
               Navigator.pop(context);
             },
           ),
@@ -317,9 +349,11 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
   }
 
   Widget _buildBotonAsignar() {
-    final bool puedeAsignar = _rutaSeleccionada != null &&
+    final puedeAsignar =
         _camionSeleccionado != null &&
-        _fechaSeleccionada != null;
+        _rutaSeleccionada != null &&
+        _fechaSeleccionada != null &&
+        !_saving;
 
     return SizedBox(
       width: double.infinity,
@@ -329,26 +363,65 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
           backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
-        child: const Text(
-          'Asignar',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
+        child: _saving
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Text(
+                'Asignar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
       ),
     );
   }
 
-  void _asignarRuta() {
-    final ruta = _rutas.firstWhere((r) => r['id'] == _rutaSeleccionada);
-    final camion = _camiones.firstWhere((c) => c['id'] == _camionSeleccionado);
+  Future<void> _asignarRuta() async {
+    if (_rutaSeleccionada == null ||
+        _camionSeleccionado == null ||
+        _fechaSeleccionada == null)
+      return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-            'Ruta ${ruta['nombre']} asignada a ${camion['placa']} para el ${_fechaSeleccionada!.day}-${_fechaSeleccionada!.month}-${_fechaSeleccionada!.year}'),
-      ),
-    );
+    setState(() => _saving = true);
+    try {
+      // 1) Llamar backend
+      final res = await _api.actualizarFechaRuta(
+        idRuta: _rutaSeleccionada!,
+        fecha: _fechaSeleccionada!, // o null si quisieras limpiar
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message'] ?? 'Asignación realizada')),
+      );
+
+      // 2) Recargar rutas del camión para que desaparezcan las ya asignadas
+      await _cargarRutasDeCamion(_camionSeleccionado!);
+
+      // 3) (Opcional) Resetear selección de ruta
+      setState(() {
+        _rutaSeleccionada = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e
+          .toString(); // si usas ApiException, será el mensaje limpio del backend
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
+}
+
+// Pequeña extensión útil
+extension _FirstOrNull<E> on Iterable<E> {
+  E? get firstOrNull => isEmpty ? null : first;
 }
