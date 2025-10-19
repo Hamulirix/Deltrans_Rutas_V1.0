@@ -380,7 +380,7 @@ class _ComboCamion extends StatelessWidget {
         border: OutlineInputBorder(),
       ),
       isExpanded: true,
-      value: value,
+      initialValue: value,
       items: camiones
           .map(
             (c) => DropdownMenuItem(

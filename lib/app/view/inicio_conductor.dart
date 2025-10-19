@@ -11,13 +11,16 @@ class InicioConductor extends StatelessWidget {
     this.placa,
   });
 
-  String _fechaHoy() {
-    final now = DateTime.now();
-    final d = now.day.toString().padLeft(2, '0');
-    final m = now.month.toString().padLeft(2, '0');
-    final y = now.year.toString();
-    return '$d/$m/$y';
-  }
+String _fechaHoy() {
+  // Hora actual en UTC
+  final utcNow = DateTime.now().toUtc();
+  // Perú es UTC-5
+  final peruTime = utcNow.add(const Duration(hours: -5));
+  final d = peruTime.day.toString().padLeft(2, '0');
+  final m = peruTime.month.toString().padLeft(2, '0');
+  final y = peruTime.year.toString();
+  return '$d/$m/$y';
+}
 
   @override
   Widget build(BuildContext context) {

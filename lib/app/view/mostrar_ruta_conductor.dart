@@ -187,7 +187,9 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
     if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) return false;
+        perm == LocationPermission.deniedForever) {
+      return false;
+    }
     return true;
   }
 

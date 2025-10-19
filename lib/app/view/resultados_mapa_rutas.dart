@@ -30,7 +30,7 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
   Map<String, dynamic>? _resumenSeleccionado;
   String? _placaSeleccionada;
 
-  List<Map<String, dynamic>> _listaRutas = [];
+  final List<Map<String, dynamic>> _listaRutas = [];
   bool _modoEditar = false;
   bool _saving = false;
 
@@ -473,7 +473,7 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: DropdownButtonFormField<String>(
-              value: _rutaSeleccionada,
+              initialValue: _rutaSeleccionada,
               items: _listaRutas.map((ruta) {
                 return DropdownMenuItem<String>(
                   value: ruta["nombre"],

@@ -142,7 +142,7 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
               )
             else
               DropdownButtonFormField<int>(
-                value: _camionSeleccionado,
+                initialValue: _camionSeleccionado,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -202,7 +202,7 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
               )
             else
               DropdownButtonFormField<int>(
-                value: _rutaSeleccionada,
+                initialValue: _rutaSeleccionada,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -387,8 +387,9 @@ class _AsignarRutasPageState extends State<AsignarRutasPage> {
   Future<void> _asignarRuta() async {
     if (_rutaSeleccionada == null ||
         _camionSeleccionado == null ||
-        _fechaSeleccionada == null)
+        _fechaSeleccionada == null) {
       return;
+    }
 
     setState(() => _saving = true);
     try {

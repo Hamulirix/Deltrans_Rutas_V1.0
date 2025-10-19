@@ -14,14 +14,36 @@ class OptimizarRutasPage extends StatefulWidget {
 }
 
 class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
-  bool _isLoading = false;
+  final bool _isLoading = false;
   PlatformFile? _selectedFile;
+
+  // Prioridad seleccionada por el usuario
+  String _prioridadSeleccionada = "NINGUNO";
+
+  // Opciones que ve el usuario
+  final List<String> _opcionesPrioridad = [
+    "NINGUNO",
+    "PANADERIA",
+    "PUESTO DE MERCADO",
+    "BODEGA",
+  ];
+
+  String _getLabel(String value) {
+    switch (value) {
+      case "NINGUNO":
+        return "Ninguno (sin prioridad)";
+      case "PUESTO DE MERCADO":
+        return "Puesto de Mercado (PDM)";
+      default:
+        return value;
+    }
+  }
 
   Future<void> _pickFile() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['xlsx', 'xls', 'csv'],
+        allowedExtensions: ['xlsx', 'xls'],
         allowMultiple: false,
       );
 
@@ -45,21 +67,21 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
       return;
     }
 
-    // Mostrar el diálogo de carga
     showDialog(
       context: context,
-      barrierDismissible: false, // no se cierra tocando fuera
+      barrierDismissible: false,
       builder: (_) => const OptimizingDialog(),
     );
 
     try {
       final api = ApiService();
-      final result = await api.optimizeWithExcel(File(_selectedFile!.path!));
+      final result = await api.optimizeWithExcel(
+        file: File(_selectedFile!.path!),
+        prioridadGiro: _prioridadSeleccionada,
+      );
 
-      // Cerrar diálogo
       if (mounted) Navigator.of(context).pop();
 
-      // Ir a resultados
       if (mounted) {
         Navigator.push(
           context,
@@ -69,12 +91,10 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
         );
       }
     } catch (e) {
-      // Cerrar diálogo si hay error
       if (mounted) Navigator.of(context).pop();
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error al optimizar: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al optimizar: $e')),
+      );
     }
   }
 
@@ -99,6 +119,49 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
                 'Sube un archivo Excel con las rutas para optimizarlas automáticamente.',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
                 textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 30),
+
+              // === ComboBox de prioridad (primero) ===
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Priorizar tipo de cliente:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButton<String>(
+                        isExpanded: true,
+                        value: _prioridadSeleccionada,
+                        icon: const Icon(Icons.arrow_drop_down),
+                        elevation: 8,
+                        style: const TextStyle(color: Colors.black87, fontSize: 16),
+                        underline: Container(height: 1, color: Colors.grey),
+                        onChanged: (String? newValue) {
+                          if (newValue != null) {
+                            setState(() {
+                              _prioridadSeleccionada = newValue;
+                            });
+                          }
+                        },
+                        items: _opcionesPrioridad.map((String value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(_getLabel(value)),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 30),
 
@@ -128,7 +191,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Formatos aceptados: .xlsx, .xls, .csv',
+                        'Formatos aceptados: .xlsx, .xls',
                         style: TextStyle(fontSize: 14, color: Colors.grey),
                         textAlign: TextAlign.center,
                       ),
@@ -139,9 +202,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
                         icon: const Icon(Icons.upload_file),
                         label: const Text('Seleccionar archivo'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.primary,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 20,

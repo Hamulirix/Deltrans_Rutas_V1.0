@@ -432,24 +432,28 @@ class ApiService {
   /// =============================
   /// Optimización con Excel
   /// =============================
-  Future<Map<String, dynamic>> optimizeWithExcel(File file) async {
+  Future<Map<String, dynamic>> optimizeWithExcel({
+    required File file,
+    required String prioridadGiro,
+  }) async {
     final token = await _getToken();
     if (token == null) throw ApiException("No autenticado");
 
     final uri = Uri.parse("$baseUrl/optimize");
     final request = http.MultipartRequest("POST", uri);
-
-    // OJO: tu backend espera el token sin "Bearer "
     request.headers["Authorization"] = token;
 
-    // Ajusta estos fields según tus valores reales
-    request.fields["sheet_name"] = "Hoja1";
-    request.fields["deposito_latitude"] = "-6.7604792";
-    request.fields["deposito_longitude"] = "-79.8707004";
-    request.fields["vehiculo_capacidad"] = "100";
-    request.fields["objetivo"] = "distancia";
-    request.fields["speed_kmh"] = "30";
+    // ✅ Solo enviamos lo necesario
+    request.fields["sheet_name"] = "Hoja1"; // tu backend lo usa
 
+    // Mapeo para el backend
+    String valorBackend = prioridadGiro;
+    if (prioridadGiro == "PUESTO DE MERCADO") {
+      valorBackend = "PDM";
+    }
+    request.fields["prioridad_giro"] = valorBackend;
+
+    // Archivo
     request.files.add(
       await http.MultipartFile.fromPath(
         "file",
@@ -656,7 +660,33 @@ class ApiService {
   /// =============================
   /// RUTAS
   /// =============================
+  ///
+  ///
 
+  // =============================
+  // Normalizadores (privados)
+  // =============================
+  Map<String, dynamic> _normalizeRutaResumenJson(Map<String, dynamic> j) {
+    final out = Map<String, dynamic>.from(j);
+
+    if (!out.containsKey('n_puntos') && out.containsKey('puntos')) {
+      out['n_puntos'] = out['puntos'];
+    }
+    out['primer_punto'] = out['primer_punto'];
+    out['ultimo_punto'] = out['ultimo_punto'];
+
+    // Asegura tipos
+    if (out['id_ruta'] is String) {
+      out['id_ruta'] = int.tryParse(out['id_ruta']) ?? 0;
+    }
+    if (out['n_puntos'] is String) {
+      out['n_puntos'] = int.tryParse(out['n_puntos']) ?? 0;
+    }
+    // 'fecha' puede ser null o String; no tocamos el formato aquí
+    return out;
+  }
+
+  @override
   Future<List<RutaResumen>> listarRutas() async {
     final resp = await http.get(
       Uri.parse("$baseUrl/rutas"),
@@ -664,7 +694,10 @@ class ApiService {
     );
     return _handleResponse<List<RutaResumen>>(resp, (json) {
       final list = (json as List).cast<Map<String, dynamic>>();
-      return list.map(RutaResumen.fromJson).toList();
+      return list
+          .map(_normalizeRutaResumenJson)
+          .map(RutaResumen.fromJson)
+          .toList();
     });
   }
 
@@ -732,6 +765,84 @@ class ApiService {
     );
   }
 
+  Future<int> agregarPuntoARuta({
+  required int idRuta,
+  required String direccion,
+  required double latitud,
+  required double longitud,
+  required int idCliente,
+  int? orden,
+}) async {
+  final body = {
+    "accion": "agregar",
+    "direccion": direccion,
+    "latitud": latitud,
+    "longitud": longitud,
+    "id_cliente": idCliente,
+    if (orden != null) "orden": orden,
+  };
+
+  final resp = await http.post(
+    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+    headers: await _jsonHeaders(),
+    body: jsonEncode(body),
+  );
+
+  return _handleResponse<int>(resp, (json) {
+    if (json is Map && json['n_puntos'] != null) {
+      final v = json['n_puntos'];
+      return v is int ? v : int.tryParse(v.toString()) ?? 0;
+    }
+    return 0;
+  });
+}
+
+
+Future<int> eliminarPuntoDeRuta({
+  required int idRuta,
+  required int idRutaPunto,
+}) async {
+  final body = {
+    "accion": "eliminar",
+    "id_ruta_punto": idRutaPunto,
+  };
+
+  final resp = await http.post(
+    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+    headers: await _jsonHeaders(),
+    body: jsonEncode(body),
+  );
+
+  return _handleResponse<int>(resp, (json) {
+    if (json is Map && json['n_puntos'] != null) {
+      final v = json['n_puntos'];
+      return v is int ? v : int.tryParse(v.toString()) ?? 0;
+    }
+    return 0;
+  });
+}
+
+Future<void> reordenarPuntoDeRuta({
+  required int idRuta,
+  required int idRutaPunto,
+  required int nuevoOrden,
+}) async {
+  final body = {
+    "accion": "reordenar",
+    "id_ruta_punto": idRutaPunto,
+    "nuevo_orden": nuevoOrden,
+  };
+
+  final resp = await http.post(
+    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+    headers: await _jsonHeaders(),
+    body: jsonEncode(body),
+  );
+
+  _handleResponse<void>(resp, (_) {});
+}
+
+
   /// GET /api/rutas/puntos?id_camion=..&fecha=YYYY-MM-DD
   Future<RutaConPuntos> obtenerPuntosRuta({
     required String placa,
@@ -753,26 +864,27 @@ class ApiService {
     );
   }
 
-Future<Map<String, dynamic>> marcarVisita({
-  required int idPunto,
-  required bool entregado, // true -> "si", false -> "no"
-}) async {
-  final uri = Uri.parse("$baseUrl/ruta-punto/visitar");
+  Future<Map<String, dynamic>> marcarVisita({
+    required int idPunto,
+    required bool entregado, // true -> "si", false -> "no"
+  }) async {
+    final uri = Uri.parse("$baseUrl/ruta-punto/visitar");
 
-  final resp = await http.put(
-    uri,
-    headers: await _jsonHeaders(withAuth: true), // token_required
-    body: jsonEncode({
-      "id_punto": idPunto,
-      "respuesta": entregado ? "si" : "no",
-    }),
-  );
+    final resp = await http.put(
+      uri,
+      headers: await _jsonHeaders(withAuth: true), // token_required
+      body: jsonEncode({
+        "id_punto": idPunto,
+        "respuesta": entregado ? "si" : "no",
+      }),
+    );
 
-  return _handleResponse<Map<String, dynamic>>(
-    resp,
-    (json) => json as Map<String, dynamic>,
-  );
-}
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => json as Map<String, dynamic>,
+    );
+  }
+
   Future<Map<String, dynamic>> obtenerReportes({
     required int idCamion,
     required DateTime fechaInicio,
@@ -798,6 +910,4 @@ Future<Map<String, dynamic>> marcarVisita({
       '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
-
 }
-

@@ -238,7 +238,7 @@ Future<void> _cargarData() async {
 
                 // Tipo de trabajador
                 DropdownButtonFormField<int>(
-                  value: _idTipoTrabajador,
+                  initialValue: _idTipoTrabajador,
                   decoration: _dec('Tipo de trabajador'),
                   items: _tipos.map((t) => DropdownMenuItem<int>(
                         value: t.id,
@@ -251,7 +251,7 @@ Future<void> _cargarData() async {
 
                 // Camión (opcional)
                 DropdownButtonFormField<int?>(
-                  value: _idCamion,
+                  initialValue: _idCamion,
                   decoration: _dec('Camión asignado (opcional)'),
                   items: [
                     const DropdownMenuItem<int?>(value: null, child: Text('— Sin camión —')),
@@ -504,7 +504,7 @@ class _RutaFormPageState extends State<RutaFormPage> {
   int? _idCamion;
   bool _estado = true;
 
-  bool _loading = false;
+  final bool _loading = false;
   List<Camion> _camiones = [];
 
   @override
@@ -578,7 +578,7 @@ class _RutaFormPageState extends State<RutaFormPage> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: _idCamion,
+                  initialValue: _idCamion,
                   decoration: _dec('Camión'),
                   items: _camiones
                       .map((c) => DropdownMenuItem<int>(value: c.idCamion, child: Text('${c.placa} (${c.marca} ${c.modelo})')))
