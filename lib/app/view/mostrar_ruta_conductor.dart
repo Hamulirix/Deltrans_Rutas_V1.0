@@ -3,54 +3,55 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/core/constants.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_application_1/app/services/api_service.dart';
 
-class RoutePreviewScreen extends StatefulWidget {
+import 'package:flutter_application_1/app/services/api_service.dart';
+import 'package:flutter_application_1/core/constants.dart';
+
+class MostrarRutaConductorPage extends StatefulWidget {
   final String placa;
   final DateTime fecha;
 
-  const RoutePreviewScreen({
+  const MostrarRutaConductorPage({
     Key? key,
     required this.placa,
     required this.fecha,
   }) : super(key: key);
 
   @override
-  State<RoutePreviewScreen> createState() => _RoutePreviewScreenState();
+  State<MostrarRutaConductorPage> createState() =>
+      _MostrarRutaConductorPageState();
 }
 
-class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
-  final _api = ApiService();
-  final Completer<GoogleMapController> _mapCtrl = Completer();
-  late Future<RutaConPuntos> _future;
+class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
+  final Completer<GoogleMapController> _mapController = Completer();
+  final ApiService _api = ApiService();
 
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
-
-  LatLngBounds? _bounds;
   StreamSubscription<Position>? _posSub;
 
-  final _meMarkerId = const MarkerId('yo');
-  final _trailId = const PolylineId('trail');
-  final _navId = const PolylineId('navegacion');
-  final List<LatLng> _trail = [];
-  bool _tracking = false;
+  // Datos de la ruta
+  int? _idRuta;
+  List<PuntoRutaDet> _puntos = [];
   int _indexActual = 0;
+  PuntoRutaDet? get _puntoActual =>
+      (_indexActual >= 0 && _indexActual < _puntos.length)
+          ? _puntos[_indexActual]
+          : null;
 
-  // Tu API Key de Google Directions
+  // Ubicación
+  LatLng? _posicionActual;
+
+  bool _cargando = true;
   static const _GOOGLE_API_KEY = AppConfig.googleMapsApiKey;
-
-  DateTime _lastDraw = DateTime.fromMillisecondsSinceEpoch(0);
-  LatLng? _lastOrigin;
 
   @override
   void initState() {
     super.initState();
-    _future = _api.obtenerPuntosRuta(placa: widget.placa, fecha: widget.fecha);
+    _cargarRuta();
   }
 
   @override
@@ -59,308 +60,317 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     super.dispose();
   }
 
-  // ========== DIBUJAR MAPA BASE ==========
-  void _construirMapa(RutaConPuntos r) {
-    _markers.clear();
-    _polylines.clear();
+  // ============================
+  // Carga inicial (ruta + puntos)
+  // ============================
+  Future<void> _cargarRuta() async {
+    try {
+      final r = await _api.obtenerPuntosRuta(
+        placa: widget.placa,
+        fecha: widget.fecha,
+      );
 
-    final pts = [...r.puntos]..sort((a, b) => a.orden.compareTo(b.orden));
-    final coords = <LatLng>[for (final p in pts) LatLng(p.latitud, p.longitud)];
+      setState(() {
+        _idRuta = r.idRuta;
+        _puntos = [...r.puntos]..sort((a, b) => a.orden.compareTo(b.orden));
+        _indexActual = 0;
+        _cargando = false;
+      });
 
-    for (var i = 0; i < pts.length; i++) {
-      final p = pts[i];
-      final hue = i == 0
-          ? BitmapDescriptor.hueGreen
-          : (i == pts.length - 1
-              ? BitmapDescriptor.hueRed
-              : BitmapDescriptor.hueAzure);
-
-      _markers.add(Marker(
-        markerId: MarkerId('p_${p.idPunto}'),
-        position: LatLng(p.latitud, p.longitud),
-        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-        infoWindow:
-            InfoWindow(title: '#${p.orden} • ${p.cliente.nombres}', snippet: p.direccion),
-      ));
+      await _obtenerUbicacionActual();
+      _dibujarMarcadoresPuntos();
+      if (_posicionActual != null && _puntoActual != null) {
+        await _trazarRuta(
+          _posicionActual!,
+          LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
+        );
+        await _ajustarCamara(_posicionActual!, _puntoActual!);
+      }
+      await _iniciarSeguimientoTiempoReal();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      setState(() => _cargando = false);
     }
-
-    _polylines.add(Polyline(
-      polylineId: const PolylineId('ruta'),
-      width: 3,
-      points: coords,
-      color: Colors.grey.shade400,
-    ));
-
-    _bounds = _calcularBounds(coords);
   }
 
-  LatLngBounds _calcularBounds(List<LatLng> coords) {
-    double minLat = coords.first.latitude, maxLat = coords.first.latitude;
-    double minLng = coords.first.longitude, maxLng = coords.first.longitude;
-    for (final c in coords.skip(1)) {
-      if (c.latitude < minLat) minLat = c.latitude;
-      if (c.latitude > maxLat) maxLat = c.latitude;
-      if (c.longitude < minLng) minLng = c.longitude;
-      if (c.longitude > maxLng) maxLng = c.longitude;
+  // ============================
+  // Geolocalización
+  // ============================
+  Future<void> _obtenerUbicacionActual() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _toast('Activa el GPS.');
+      return;
     }
-    return LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      _toast('Permiso de ubicación denegado.');
+      return;
+    }
+
+    final pos = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.best,
     );
+    _posicionActual = LatLng(pos.latitude, pos.longitude);
+    _actualizarMarcadorYo();
   }
 
-  Future<void> _fitToBounds() async {
-    if (_bounds == null) return;
-    final ctrl = await _mapCtrl.future;
-    await ctrl.animateCamera(CameraUpdate.newLatLngBounds(_bounds!, 60));
-  }
-
-  // ========== DIRECTIONS API ==========
-  Future<void> _drawRoute(LatLng origin, LatLng destination) async {
-    final now = DateTime.now();
-    if (_lastOrigin != null) {
-      final dist = Geolocator.distanceBetween(
-          _lastOrigin!.latitude, _lastOrigin!.longitude, origin.latitude, origin.longitude);
-      if (dist < 10 && now.difference(_lastDraw).inSeconds < 10) return;
-    }
-
-    _lastOrigin = origin;
-    _lastDraw = now;
-
-    final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${origin.latitude},${origin.longitude}'
-        '&destination=${destination.latitude},${destination.longitude}'
-        '&mode=driving&key=$_GOOGLE_API_KEY');
-
-    final resp = await http.get(url);
-    if (resp.statusCode != 200) return;
-
-    final data = jsonDecode(resp.body);
-    if (data['status'] != 'OK') return;
-
-    final route = data['routes'][0];
-    final points = _decodePolyline(route['overview_polyline']['points']);
-    _polylines.removeWhere((p) => p.polylineId == _navId);
-    _polylines.add(Polyline(
-      polylineId: _navId,
-      points: points,
-      color: Colors.blue,
-      width: 6,
+  void _actualizarMarcadorYo() {
+    if (_posicionActual == null) return;
+    _markers.removeWhere((m) => m.markerId == const MarkerId('yo'));
+    _markers.add(Marker(
+      markerId: const MarkerId('yo'),
+      position: _posicionActual!,
+      infoWindow: const InfoWindow(title: 'Tu ubicación'),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
     ));
     setState(() {});
   }
 
+  // ============================
+  // Marcadores de puntos
+  // ============================
+  void _dibujarMarcadoresPuntos() {
+    _markers.removeWhere((m) => m.markerId.value.startsWith('p_'));
+    for (int i = 0; i < _puntos.length; i++) {
+      final p = _puntos[i];
+      final hue = i == 0
+          ? BitmapDescriptor.hueGreen
+          : (i == _puntos.length - 1
+              ? BitmapDescriptor.hueRed
+              : BitmapDescriptor.hueRose);
+      _markers.add(Marker(
+        markerId: MarkerId('p_${p.idPunto}'),
+        position: LatLng(p.latitud, p.longitud),
+        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        infoWindow: InfoWindow(
+          title: '#${p.orden} • ${p.cliente.nombres}',
+          snippet: '${p.direccion} • ${p.cliente.giro}',
+        ),
+      ));
+    }
+    setState(() {});
+  }
+
+  // ============================
+  // Tracking en tiempo real
+  // ============================
+  Future<void> _iniciarSeguimientoTiempoReal() async {
+    if (_puntos.isEmpty) return;
+
+    _posSub?.cancel();
+    _posSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
+      ),
+    ).listen((pos) async {
+      _posicionActual = LatLng(pos.latitude, pos.longitude);
+      _actualizarMarcadorYo();
+
+      if (_puntoActual != null) {
+        final destino =
+            LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
+
+        // Redibuja navegación (polyline) y ajusta cámara
+        await _trazarRuta(_posicionActual!, destino);
+        await _ajustarCamara(_posicionActual!, _puntoActual!);
+
+        // ¿Llegó?
+        final dist = Geolocator.distanceBetween(
+          _posicionActual!.latitude,
+          _posicionActual!.longitude,
+          destino.latitude,
+          destino.longitude,
+        );
+
+        if (dist < 40) {
+          await _onLlegadaAPunto(_puntoActual!);
+        }
+      }
+    });
+  }
+
+  // Al llegar a un punto
+  Future<void> _onLlegadaAPunto(PuntoRutaDet punto) async {
+    _toast('Llegaste a ${punto.cliente.nombres}');
+    try {
+      if (_idRuta != null) {
+        await _api.marcarPuntoVisitado(
+          idRuta: _idRuta!,
+          idPunto: punto.idPunto,
+        );
+      }
+    } catch (e) {
+      _toast('No pude marcar el punto como visitado: $e');
+    }
+
+    // Avanzar al siguiente
+    if (_indexActual < _puntos.length - 1) {
+      setState(() => _indexActual++);
+      final sig = _puntoActual!;
+      await _trazarRuta(
+        _posicionActual!,
+        LatLng(sig.latitud, sig.longitud),
+      );
+      await _ajustarCamara(_posicionActual!, sig);
+    } else {
+      // Terminado: inactivar ruta y volver
+      try {
+        if (_idRuta != null) {
+          await _api.actualizarEstadoRuta(idRuta: _idRuta!, estado: false);
+        }
+      } catch (e) {
+        _toast('No pude marcar la ruta como finalizada: $e');
+      }
+      _toast('Ruta completada');
+      if (mounted) Navigator.of(context).pop(); // volver a la pantalla anterior
+    }
+  }
+
+  // ============================
+  // Directions API + cámara
+  // ============================
+  Future<void> _trazarRuta(LatLng origen, LatLng destino) async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/directions/json'
+        '?origin=${origen.latitude},${origen.longitude}'
+        '&destination=${destino.latitude},${destino.longitude}'
+        '&mode=driving&language=es&key=$_GOOGLE_API_KEY',
+      );
+      final resp = await http.get(url);
+      if (resp.statusCode != 200) return;
+      final data = jsonDecode(resp.body);
+      if (data['status'] != 'OK') return;
+
+      final encoded = data['routes'][0]['overview_polyline']['points'] as String;
+      final pts = _decodePolyline(encoded);
+
+      _polylines
+        ..removeWhere((p) => p.polylineId == const PolylineId('nav'))
+        ..add(Polyline(
+          polylineId: const PolylineId('nav'),
+          points: pts,
+          width: 6,
+          color: Colors.blue,
+        ));
+      setState(() {});
+    } catch (_) {}
+  }
+
   List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> poly = [];
-    int index = 0, len = encoded.length;
-    int lat = 0, lng = 0;
-    while (index < len) {
+    final List<LatLng> poly = [];
+    int index = 0, lat = 0, lng = 0;
+    while (index < encoded.length) {
       int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
+      do { b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift; shift += 5;
       } while (b >= 0x20);
-      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
       lat += dlat;
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
+      shift = 0; result = 0;
+      do { b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift; shift += 5;
       } while (b >= 0x20);
-      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
       lng += dlng;
-      poly.add(LatLng(lat / 1E5, lng / 1E5));
+      poly.add(LatLng(lat / 1e5, lng / 1e5));
     }
     return poly;
   }
 
-  // ========== PERMISOS + TRACKING ==========
-  Future<bool> _asegurarPermisos() async {
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      await Geolocator.openLocationSettings();
-      return false;
-    }
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      return false;
-    }
-    return true;
-  }
+  Future<void> _ajustarCamara(LatLng origen, PuntoRutaDet destino) async {
+    final ctrl = await (_mapController.isCompleted
+        ? _mapController.future
+        : Future<GoogleMapController?>.value(null));
+    if (ctrl == null) return;
 
-  Future<void> _iniciarRuta(RutaConPuntos ruta) async {
-    if (!await _asegurarPermisos()) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Activa permisos/GPS para iniciar la ruta')));
-      return;
-    }
-
-    setState(() => _tracking = true);
-    _trail.clear();
-
-    _posSub?.cancel();
-    _posSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 5),
-    ).listen((pos) async {
-      final latLng = LatLng(pos.latitude, pos.longitude);
-
-      // marcador del conductor
-      _markers.removeWhere((m) => m.markerId == _meMarkerId);
-      _markers.add(Marker(
-        markerId: _meMarkerId,
-        position: latLng,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        infoWindow: const InfoWindow(title: 'Tu ubicación'),
-      ));
-
-      // dibujar rastro
-      _trail.add(latLng);
-      _polylines.removeWhere((p) => p.polylineId == _trailId);
-      _polylines.add(Polyline(polylineId: _trailId, points: List.of(_trail), color: Colors.indigo));
-
-      // centrado
-      final ctrl = await _mapCtrl.future;
-      ctrl.animateCamera(CameraUpdate.newLatLng(latLng));
-
-      // actualizar ruta Directions API
-      final pts = [...ruta.puntos]..sort((a, b) => a.orden.compareTo(b.orden));
-      if (_indexActual < pts.length) {
-        final destino = LatLng(pts[_indexActual].latitud, pts[_indexActual].longitud);
-        _drawRoute(latLng, destino);
-
-        // Llegada al punto
-        final distM = Geolocator.distanceBetween(
-            pos.latitude, pos.longitude, destino.latitude, destino.longitude);
-        if (distM < 40) {
-          _mostrarModalPunto(pts[_indexActual], onSeleccion: (entregado) async {
-            await _api.marcarVisita(idPunto: pts[_indexActual].idPunto, entregado: entregado);
-            Navigator.of(context).pop();
-            setState(() => _indexActual = math.min(_indexActual + 1, pts.length - 1));
-          });
-        }
-      }
-
-      setState(() {});
-    });
-  }
-
-  // ========== MODAL ==========
-  void _mostrarModalPunto(PuntoRutaDet punto, {required void Function(bool) onSeleccion}) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Row(children: [
-            const Text('N° pedido:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 6),
-            Text('${punto.orden}'),
-          ]),
-          _info('Dirección', punto.direccion),
-          _info('Giro', punto.cliente.giro),
-          _info('Cliente', punto.cliente.nombres),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 200,
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(punto.latitud, punto.longitud),
-                zoom: 16,
-              ),
-              markers: {
-                Marker(
-                    markerId: const MarkerId('dest'),
-                    position: LatLng(punto.latitud, punto.longitud),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed))
-              },
-              liteModeEnabled: true,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(
-                child: OutlinedButton(
-                    onPressed: () => onSeleccion(false), child: const Text('No entregado'))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: ElevatedButton(
-                    onPressed: () => onSeleccion(true), child: const Text('Entregado'))),
-          ]),
-        ]),
+    // Bounds entre tu ubicación y el destino actual
+    final bounds = LatLngBounds(
+      southwest: LatLng(
+        math.min(origen.latitude, destino.latitud),
+        math.min(origen.longitude, destino.longitud),
+      ),
+      northeast: LatLng(
+        math.max(origen.latitude, destino.latitud),
+        math.max(origen.longitude, destino.longitud),
       ),
     );
+    await ctrl.animateCamera(CameraUpdate.newLatLngBounds(bounds, 96));
   }
 
-  Widget _info(String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(children: [
-          Text('$k: ', style: const TextStyle(fontWeight: FontWeight.w600)),
-          Expanded(child: Text(v)),
-        ]),
-      );
+  // ============================
+  // UI
+  // ============================
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
-  // ========== UI ==========
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ruta asignada')),
-      body: FutureBuilder<RutaConPuntos>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return Center(child: Text('Error: ${snap.error}'));
-          }
-
-          final ruta = snap.data!;
-          _construirMapa(ruta);
-
-          final target = _bounds == null
-              ? const LatLng(-12.0464, -77.0428)
-              : LatLng((_bounds!.northeast.latitude + _bounds!.southwest.latitude) / 2,
-                  (_bounds!.northeast.longitude + _bounds!.southwest.longitude) / 2);
-
-          return Column(children: [
-            Expanded(
-              child: GoogleMap(
-                initialCameraPosition: CameraPosition(target: target, zoom: 12),
-                markers: _markers,
-                polylines: _polylines,
-                myLocationEnabled: _tracking,
-                compassEnabled: true,
-                zoomControlsEnabled: false,
-                onMapCreated: (c) async {
-                  _mapCtrl.complete(c);
-                  await Future.delayed(const Duration(milliseconds: 300));
-                  _fitToBounds();
-                },
-              ),
-            ),
-            SafeArea(
-              minimum: const EdgeInsets.all(12),
-              child: Column(children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _tracking ? null : () => _iniciarRuta(ruta),
-                    child: Text(_tracking ? 'Ruta en curso…' : 'Iniciar ruta'),
+      body: _cargando
+          ? const Center(child: CircularProgressIndicator())
+          : Stack(
+              children: [
+                GoogleMap(
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(-6.77, -79.84),
+                    zoom: 12,
                   ),
+                  myLocationEnabled: true,
+                  zoomControlsEnabled: false,
+                  markers: _markers,
+                  polylines: _polylines,
+                  onMapCreated: (c) {
+                    if (!_mapController.isCompleted) _mapController.complete(c);
+                  },
                 ),
-              ]),
+
+                // Ventana de info del cliente actual
+                if (_puntoActual != null)
+                  Positioned(
+                    top: 28,
+                    left: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 8,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Orden: ${_puntoActual!.orden}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          Text('Código: ${_puntoActual!.cliente.codigo}'),
+                          Text('Cliente: ${_puntoActual!.cliente.nombres}'),
+                          Text('Giro: ${_puntoActual!.cliente.giro}'),
+                          Text('Dirección: ${_puntoActual!.direccion}'),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ]);
-        },
-      ),
     );
   }
 }

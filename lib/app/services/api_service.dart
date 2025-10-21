@@ -238,10 +238,12 @@ class CamionUpdateDto {
 // --- MODELO ---
 class RutaResumen {
   final int idRuta;
-  final String? fecha; // puede venir null
+  final String? fecha;
   final int nPuntos;
   final String? primerPunto;
   final String? ultimoPunto;
+  final int estado;
+  final String? placa;
 
   RutaResumen({
     required this.idRuta,
@@ -249,18 +251,23 @@ class RutaResumen {
     required this.nPuntos,
     required this.primerPunto,
     required this.ultimoPunto,
+    required this.estado,
+    required this.placa,
   });
 
   factory RutaResumen.fromJson(Map<String, dynamic> j) => RutaResumen(
     idRuta: j['id_ruta'] as int,
-    fecha: j['fecha'] as String?, // null si no tiene fecha
+    fecha: j['fecha'] as String?,
     nPuntos: (j['n_puntos'] ?? 0) as int,
     primerPunto: j['primer_punto'] as String?,
     ultimoPunto: j['ultimo_punto'] as String?,
+    estado: j['estado'] as int,
+    placa: j['placa'] as String?,
   );
 }
 
 class PuntoRuta {
+  final int idPunto;
   final int numero;
   final String direccion;
   final double lat;
@@ -268,6 +275,7 @@ class PuntoRuta {
   final bool visitado;
 
   PuntoRuta({
+    required this.idPunto,
     required this.numero,
     required this.direccion,
     required this.lat,
@@ -276,6 +284,7 @@ class PuntoRuta {
   });
 
   factory PuntoRuta.fromJson(Map<String, dynamic> j) => PuntoRuta(
+    idPunto: j['id_ruta_punto'],
     numero: j['numero'],
     direccion: j['direccion'],
     lat: (j['lat'] as num).toDouble(),
@@ -405,9 +414,6 @@ class ApiService {
     }
   }
 
-  /// =============================
-  /// Auth
-  /// =============================
   Future<Map<String, dynamic>?> login(String username, String password) async {
     try {
       final response = await http.post(
@@ -686,7 +692,6 @@ class ApiService {
     return out;
   }
 
-  @override
   Future<List<RutaResumen>> listarRutas() async {
     final resp = await http.get(
       Uri.parse("$baseUrl/rutas"),
@@ -710,6 +715,18 @@ class ApiService {
       final list = (json as List).cast<Map<String, dynamic>>();
       return list.map(PuntoRuta.fromJson).toList();
     });
+  }
+
+  Future<RutaResumen> obtenerDetalleRuta(int idRuta) async {
+    final resp = await http.get(
+      Uri.parse("$baseUrl/rutas/$idRuta"),
+      headers: await _jsonHeaders(),
+    );
+
+    return _handleResponse<RutaResumen>(
+      resp,
+      (json) => RutaResumen.fromJson(json as Map<String, dynamic>),
+    );
   }
 
   Future<String> eliminarRuta(int idRuta) async {
@@ -766,82 +783,77 @@ class ApiService {
   }
 
   Future<int> agregarPuntoARuta({
-  required int idRuta,
-  required String direccion,
-  required double latitud,
-  required double longitud,
-  required int idCliente,
-  int? orden,
-}) async {
-  final body = {
-    "accion": "agregar",
-    "direccion": direccion,
-    "latitud": latitud,
-    "longitud": longitud,
-    "id_cliente": idCliente,
-    if (orden != null) "orden": orden,
-  };
+    required int idRuta,
+    required String direccion,
+    required double latitud,
+    required double longitud,
+    required int idCliente,
+    int? orden,
+  }) async {
+    final body = {
+      "accion": "agregar",
+      "direccion": direccion,
+      "latitud": latitud,
+      "longitud": longitud,
+      "id_cliente": idCliente,
+      if (orden != null) "orden": orden,
+    };
 
-  final resp = await http.post(
-    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
-    headers: await _jsonHeaders(),
-    body: jsonEncode(body),
-  );
+    final resp = await http.post(
+      Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(body),
+    );
 
-  return _handleResponse<int>(resp, (json) {
-    if (json is Map && json['n_puntos'] != null) {
-      final v = json['n_puntos'];
-      return v is int ? v : int.tryParse(v.toString()) ?? 0;
-    }
-    return 0;
-  });
-}
+    return _handleResponse<int>(resp, (json) {
+      if (json is Map && json['n_puntos'] != null) {
+        final v = json['n_puntos'];
+        return v is int ? v : int.tryParse(v.toString()) ?? 0;
+      }
+      return 0;
+    });
+  }
 
+  Future<int> eliminarPuntoDeRuta({
+    required int idRuta,
+    required int idRutaPunto,
+  }) async {
+    final body = {"accion": "eliminar", "id_ruta_punto": idRutaPunto};
 
-Future<int> eliminarPuntoDeRuta({
-  required int idRuta,
-  required int idRutaPunto,
-}) async {
-  final body = {
-    "accion": "eliminar",
-    "id_ruta_punto": idRutaPunto,
-  };
+    final resp = await http.post(
+      Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(body),
+    );
 
-  final resp = await http.post(
-    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
-    headers: await _jsonHeaders(),
-    body: jsonEncode(body),
-  );
+    return _handleResponse<int>(resp, (json) {
+      if (json is Map && json['n_puntos'] != null) {
+        final v = json['n_puntos'];
+        return v is int ? v : int.tryParse(v.toString()) ?? 0;
+      }
+      return 0;
+    });
+  }
 
-  return _handleResponse<int>(resp, (json) {
-    if (json is Map && json['n_puntos'] != null) {
-      final v = json['n_puntos'];
-      return v is int ? v : int.tryParse(v.toString()) ?? 0;
-    }
-    return 0;
-  });
-}
+  Future<void> reordenarPuntoDeRuta({
+    required int idRuta,
+    required int idRutaPunto,
+    required int nuevoOrden,
+  }) async {
+    final body = {
+      "accion": "reordenar",
+      "id_ruta_punto": idRutaPunto,
+      "nuevo_orden": nuevoOrden,
+    };
 
-Future<void> reordenarPuntoDeRuta({
-  required int idRuta,
-  required int idRutaPunto,
-  required int nuevoOrden,
-}) async {
-  final body = {
-    "accion": "reordenar",
-    "id_ruta_punto": idRutaPunto,
-    "nuevo_orden": nuevoOrden,
-  };
+    final resp = await http.post(
+      Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
+      headers: await _jsonHeaders(),
+      body: jsonEncode(body),
+    );
 
-  final resp = await http.post(
-    Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
-    headers: await _jsonHeaders(),
-    body: jsonEncode(body),
-  );
-
-  _handleResponse<void>(resp, (_) {});
-}
-
+    _handleResponse<void>(resp, (_) {});
+  }
 
   /// GET /api/rutas/puntos?id_camion=..&fecha=YYYY-MM-DD
   Future<RutaConPuntos> obtenerPuntosRuta({
@@ -864,26 +876,47 @@ Future<void> reordenarPuntoDeRuta({
     );
   }
 
-  Future<Map<String, dynamic>> marcarVisita({
-    required int idPunto,
-    required bool entregado, // true -> "si", false -> "no"
-  }) async {
-    final uri = Uri.parse("$baseUrl/ruta-punto/visitar");
+// Marca un punto como visitado para una ruta
+Future<Map<String, dynamic>> marcarPuntoVisitado({
+  required int idRuta,
+  required int idPunto,
+}) async {
+  final uri = Uri.parse('$baseUrl/ruta-punto/visitar');
 
-    final resp = await http.put(
-      uri,
-      headers: await _jsonHeaders(withAuth: true), // token_required
-      body: jsonEncode({
-        "id_punto": idPunto,
-        "respuesta": entregado ? "si" : "no",
-      }),
-    );
+  final resp = await http.put(
+    uri,
+    headers: await _jsonHeaders(withAuth: true),
+    body: jsonEncode({
+      'id_ruta': idRuta,
+      'id_punto': idPunto,
+    }),
+  );
 
-    return _handleResponse<Map<String, dynamic>>(
-      resp,
-      (json) => json as Map<String, dynamic>,
-    );
-  }
+  return _handleResponse<Map<String, dynamic>>(
+    resp,
+    (json) => json as Map<String, dynamic>,
+  );
+}
+
+// Cambia el estado de la ruta (true=activa, false=inactiva)
+Future<Map<String, dynamic>> actualizarEstadoRuta({
+  required int idRuta,
+  required bool estado,
+}) async {
+  final uri = Uri.parse('$baseUrl/rutas/$idRuta/estado');
+
+  final resp = await http.put(
+    uri,
+    headers: await _jsonHeaders(withAuth: true),
+    body: jsonEncode({'estado': estado}),
+  );
+
+  return _handleResponse<Map<String, dynamic>>(
+    resp,
+    (json) => json as Map<String, dynamic>,
+  );
+}
+
 
   Future<Map<String, dynamic>> obtenerReportes({
     required int idCamion,
@@ -910,4 +943,59 @@ Future<void> reordenarPuntoDeRuta({
       '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
+
+  Future<Map<String, dynamic>?> buscarClientePorCodigo(String codigo) async {
+    final codigoTrim = codigo.trim();
+
+    // Opción 1 (simple, clara)
+    final uri = Uri.parse(
+      '$baseUrl/clientes/buscar?codigo=${Uri.encodeQueryComponent(codigoTrim)}',
+    );
+
+    // Opción 2 (alternativa equivalente):
+    // final uri = Uri.parse('$baseUrl/api/clientes/buscar')
+    //     .replace(queryParameters: {'codigo': codigoTrim});
+
+    final resp = await http.get(uri, headers: await _jsonHeaders());
+
+    if (resp.statusCode == 200) {
+      return json.decode(resp.body) as Map<String, dynamic>;
+    } else if (resp.statusCode == 404) {
+      return null;
+    } else {
+      throw ApiException(
+        'Error ${resp.statusCode}: ${resp.body}',
+        statusCode: resp.statusCode,
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> crearCliente({
+    required String codigo,
+    required String nombres,
+    required String giro,
+  }) async {
+    final uri = Uri.parse('$baseUrl/clientes');
+
+    final body = json.encode({
+      'codigo': codigo.trim(),
+      'nombres': nombres.trim(),
+      'giro': giro.trim(),
+    });
+
+    final resp = await http.post(
+      uri,
+      headers: await _jsonHeaders(),
+      body: body,
+    );
+
+    if (resp.statusCode == 201 || resp.statusCode == 200) {
+      return json.decode(resp.body) as Map<String, dynamic>;
+    } else {
+      throw ApiException(
+        'Error ${resp.statusCode}: ${resp.body}',
+        statusCode: resp.statusCode,
+      );
+    }
+  }
 }

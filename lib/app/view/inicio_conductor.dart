@@ -59,7 +59,7 @@ String _fechaHoy() {
                 }
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => RoutePreviewScreen(
+                    builder: (_) => MostrarRutaConductorPage(
                       placa: placa!,                 // la que muestras arriba
                       fecha: DateTime.now(),         // hoy
                     ),

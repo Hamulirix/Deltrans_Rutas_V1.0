@@ -1,144 +1,225 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/app/view/seleccionar_punto.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/api_service.dart';
 
-class EditarRutaPage extends StatefulWidget {
-  final String nombreRuta;                  // p.ej. "Ruta 1 - 60 puntos"
-  final List<Map<String, dynamic>> puntos;  // lista original de puntos
-  final List<Map<String, dynamic>> catalogoPuntos; // catálogo para “Añadir punto”
+class EditarRutaMapaPage extends StatefulWidget {
+  final int idRuta;
 
-  const EditarRutaPage({
-    super.key,
-    required this.nombreRuta,
-    required this.puntos,
-    required this.catalogoPuntos,
-  });
+  const EditarRutaMapaPage({super.key, required this.idRuta});
 
   @override
-  State<EditarRutaPage> createState() => _EditarRutaPageState();
+  State<EditarRutaMapaPage> createState() => _EditarRutaMapaPageState();
 }
 
-class _EditarRutaPageState extends State<EditarRutaPage> {
-  late List<Map<String, dynamic>> _puntos;
+class _EditarRutaMapaPageState extends State<EditarRutaMapaPage> {
+  final _api = ApiService();
+  final Set<Marker> _marcadores = {};
+  final Set<Polyline> _polilineas = {};
+  GoogleMapController? _mapController;
+  DateTime? _fechaSeleccionada;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _puntos = List<Map<String, dynamic>>.from(widget.puntos);
+    _cargarDatosIniciales();
   }
 
-  void _eliminarPunto(int index) {
-    setState(() {
-      _puntos.removeAt(index);
-    });
-  }
 
-  Future<void> _anadirPunto() async {
-    // Navega a la pantalla de selección (con búsqueda/paginación)
-    final seleccionado = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SeleccionarPuntoPage(
-          catalogo: widget.catalogoPuntos,
-          pageSize: 10,
-        ),
-      ),
-    );
+DateTime? _parseFecha(String? fecha) {
+  if (fecha == null) return null;
+  final partes = fecha.split('/');
+  if (partes.length != 3) return null;
+  final day = int.tryParse(partes[0]) ?? 1;
+  final month = int.tryParse(partes[1]) ?? 1;
+  final year = int.tryParse(partes[2]) ?? 2000;
+  return DateTime(year, month, day);
+}
+  Future<void> _cargarDatosIniciales() async {
+    try {
+      final puntos = await _api.listarPuntosDeRuta(widget.idRuta);
+      final detalle = await _api.obtenerDetalleRuta(widget.idRuta);
 
-    if (seleccionado != null) {
       setState(() {
-        // Lo agregamos al final para mantener el orden actual
-        _puntos.add(seleccionado);
+        _fechaSeleccionada =_fechaSeleccionada = _parseFecha(detalle.fecha);
       });
+
+      final List<LatLng> coordenadas = [];
+
+      for (int i = 0; i < puntos.length; i++) {
+        final punto = puntos[i];
+        final latLng = LatLng(punto.lat, punto.lng);
+        coordenadas.add(latLng);
+
+        _marcadores.add(Marker(
+          markerId: MarkerId('punto_${punto.idPunto}'),
+          position: latLng,
+          infoWindow: InfoWindow(title: punto.direccion),
+          icon: i == 0
+              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen) // primero
+              : (i == puntos.length - 1
+                  ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed) // último
+                  : BitmapDescriptor.defaultMarker),
+        ));
+      }
+
+      _polilineas.add(Polyline(
+        polylineId: const PolylineId('ruta'),
+        color: Colors.blue,
+        width: 4,
+        points: coordenadas,
+      ));
+
+      if (coordenadas.isNotEmpty) {
+        await _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(coordenadas.first, 13),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error cargando puntos: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _establecerRuta() {
-    Navigator.pop(context, _puntos); // devolver al caller
+  void _mostrarSelectorFechaSimple() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Seleccionar fecha'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: CalendarDatePicker(
+            initialDate: _fechaSeleccionada ?? DateTime.now(),
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2030),
+            onDateChanged: (DateTime value) {
+              setState(() => _fechaSeleccionada = value);
+              Navigator.pop(context);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectorFecha() {
+    final text = _fechaSeleccionada == null
+        ? ''
+        : '${_fechaSeleccionada!.day.toString().padLeft(2, '0')}-'
+            '${_fechaSeleccionada!.month.toString().padLeft(2, '0')}-'
+            '${_fechaSeleccionada!.year}';
+
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Fecha',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: TextEditingController(text: text),
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      hintText: 'DD-MM-AAAA',
+                    ),
+                    readOnly: true,
+                    onTap: _mostrarSelectorFechaSimple,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  icon: Icon(
+                    Icons.calendar_today,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  onPressed: _mostrarSelectorFechaSimple,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _guardarYVolver() async {
+    try {
+      await _api.actualizarFechaRuta(
+        idRuta: widget.idRuta,
+        fecha: _fechaSeleccionada,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ruta actualizada con éxito')),
+        );
+        Navigator.pop(context); // volver a gestionar_ruta
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error guardando ruta: $e')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Editar ruta'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context), // cancelar sin guardar
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Encabezado y botón añadir
-            Row(
+      appBar: AppBar(title: const Text('Editar Ruta')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
                 Expanded(
-                  child: Text(
-                    widget.nombreRuta,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  child: GoogleMap(
+                    initialCameraPosition: const CameraPosition(
+                      target: LatLng(0, 0),
+                      zoom: 12,
+                    ),
+                    markers: _marcadores,
+                    polylines: _polilineas,
+                    onMapCreated: (controller) {
+                      _mapController = controller;
+                    },
                   ),
                 ),
-                ElevatedButton.icon(
-                  onPressed: _anadirPunto,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Añadir punto'),
+                _buildSelectorFecha(),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.save),
+                      label: const Text('Guardar ruta'),
+                      onPressed: _guardarYVolver,
+                    ),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-
-            // Lista de puntos con icono eliminar
-            Expanded(
-              child: _puntos.isEmpty
-                  ? const Center(child: Text('Sin puntos en la ruta'))
-                  : ListView.separated(
-                      itemCount: _puntos.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 6),
-                      itemBuilder: (_, index) {
-                        final p = _puntos[index];
-                        final direccion = (p['direccion'] ?? '').toString().trim();
-                        final codigo = (p['codigo'] ?? '').toString().trim();
-                        final texto = direccion.isNotEmpty
-                            ? '$direccion${codigo.isNotEmpty ? " ($codigo)" : ""}'
-                            : 'Punto ${index + 1}';
-
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(width: 28, child: Text('${index + 1}.')),
-                            Expanded(
-                              child: Text(
-                                texto,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Eliminar',
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: () => _eliminarPunto(index),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Botón establecer
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _puntos.isNotEmpty ? _establecerRuta : null,
-                child: const Text('Establecer ruta'),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

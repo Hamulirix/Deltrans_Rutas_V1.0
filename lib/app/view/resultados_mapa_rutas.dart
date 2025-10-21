@@ -1,11 +1,10 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app/view/asignar_rutas.dart';
+import 'package:flutter_application_1/app/view/buscar_cliente.dart';
 import 'package:flutter_application_1/core/constants.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-
 import '../services/api_service.dart';
 
 class ResultadoRutasMapaPage extends StatefulWidget {
@@ -23,7 +22,6 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
   Set<Polyline> _polylines = {};
   List<LatLng> _puntosRuta = [];
 
-  // para encuadre al iniciar
   CameraUpdate? _pendingUpdate;
 
   String? _rutaSeleccionada;
@@ -33,7 +31,9 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
   final List<Map<String, dynamic>> _listaRutas = [];
   bool _modoEditar = false;
   bool _saving = false;
+  bool _agregandoPunto = false;
 
+  final Map<String, Map<String, dynamic>> _clientePorCoord = {};
 
   static const String _googleApiKey = AppConfig.googleMapsApiKey;
 
@@ -69,38 +69,23 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
 
   void _cargarRuta(Map<String, dynamic> ruta) {
     final puntos = (ruta["puntos"] as List).cast<Map<String, dynamic>>();
-
     final nuevosPuntos = <LatLng>[];
-    final nuevosMarkers = <Marker>{};
+    _clientePorCoord.clear();
 
-    for (int i = 0; i < puntos.length; i++) {
-      final p = puntos[i];
-      final pos = LatLng(
-        (p["latitude"] as num).toDouble(),
-        (p["longitude"] as num).toDouble(),
-      );
+    for (final p in puntos) {
+      final lat = (p["latitude"] as num).toDouble();
+      final lng = (p["longitude"] as num).toDouble();
+      final pos = LatLng(lat, lng);
       nuevosPuntos.add(pos);
 
-      final icono = (i == 0)
-          ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
-          : (i == puntos.length - 1)
-              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)
-              : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
-
-      nuevosMarkers.add(
-        Marker(
-          markerId: MarkerId("punto_$i"),
-          position: pos,
-          infoWindow: InfoWindow(
-            title: "Punto ${i + 1}",
-            snippet: (p["cliente"] ?? '').toString(),
-          ),
-          icon: icono,
-          onTap: () {
-            if (_modoEditar) _eliminarPunto(pos);
-          },
-        ),
-      );
+      final key = "$lat,$lng";
+      _clientePorCoord[key] = {
+        "codigo": (p["codigo"] ?? "").toString(),
+        "nombres": (p["cliente"] ?? p["nombres"] ?? "").toString(),
+        "giro": (p["giro"] ?? "").toString(),
+        "direccion": (p["direccion"] ?? "").toString(),
+        "id_cliente": p["id_cliente"],
+      };
     }
 
     setState(() {
@@ -108,18 +93,51 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
       _resumenSeleccionado = Map<String, dynamic>.from(ruta["resumen"]);
       _placaSeleccionada = ruta["placa"];
       _puntosRuta = nuevosPuntos;
-      _marcadores = nuevosMarkers;
       _polylines = {};
     });
 
-    // traza vial (o recta si falla)
+    _rebuildDesdePuntos();
+  }
+
+  // =======================
+  // Reconstrucción visual
+  // =======================
+  void _rebuildDesdePuntos() {
+    final nuevosMarkers = <Marker>{};
+    for (int i = 0; i < _puntosRuta.length; i++) {
+      final pos = _puntosRuta[i];
+      final icono = (i == 0)
+          ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
+          : (i == _puntosRuta.length - 1)
+              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)
+              : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+
+      final key = "${pos.latitude},${pos.longitude}";
+      final cli = _clientePorCoord[key];
+      final snippet = (cli != null && (cli["nombres"]?.toString().isNotEmpty ?? false))
+          ? "${cli["nombres"]} (${cli["codigo"] ?? "-"})"
+          : null;
+
+      nuevosMarkers.add(
+        Marker(
+          markerId: MarkerId("punto_$i"),
+          position: pos,
+          infoWindow: InfoWindow(title: "Punto ${i + 1}", snippet: snippet),
+          icon: icono,
+          onTap: () {
+            if (_modoEditar) _mostrarAccionesPunto(i);
+          },
+        ),
+      );
+    }
+
+    setState(() => _marcadores = nuevosMarkers);
     _drawRoadPolyline();
   }
 
   // =======================
-  // Trazo "por calles"
+  // Trazo de ruta por calles
   // =======================
-
   Future<void> _drawRoadPolyline() async {
     if (_puntosRuta.length < 2) {
       setState(() => _polylines.clear());
@@ -128,7 +146,6 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
 
     try {
       final roadPath = await _fetchRoadPath(_puntosRuta);
-
       if (!mounted) return;
       setState(() {
         _polylines = {
@@ -140,13 +157,9 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
           ),
         };
       });
-
-      // encuadre sobre el camino vial
       final b = _boundsFromLatLngList(roadPath);
-      final update = CameraUpdate.newLatLngBounds(b, 50);
-      _applyOrQueueCameraUpdate(update);
+      _applyOrQueueCameraUpdate(CameraUpdate.newLatLngBounds(b, 50));
     } catch (e) {
-      // fallback a líneas rectas
       if (!mounted) return;
       setState(() {
         _polylines = {
@@ -160,48 +173,35 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
       });
       final b = _boundsFromLatLngList(_puntosRuta);
       _applyOrQueueCameraUpdate(CameraUpdate.newLatLngBounds(b, 50));
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo obtener ruta por calles: $e')),
       );
     }
   }
 
-  // Divide en chunks (25 puntos máx. por request) y decodifica polyline
   Future<List<LatLng>> _fetchRoadPath(List<LatLng> puntos) async {
-    const maxPerRequest = 25; // origin + destination + 23 waypoints
+    const maxPerRequest = 25;
     final List<LatLng> resultPath = [];
 
     Future<void> fetchChunk(List<LatLng> chunk) async {
       if (chunk.length < 2) return;
-
-      final origin =
-          '${chunk.first.latitude},${chunk.first.longitude}';
-      final destination =
-          '${chunk.last.latitude},${chunk.last.longitude}';
+      final origin = '${chunk.first.latitude},${chunk.first.longitude}';
+      final destination = '${chunk.last.latitude},${chunk.last.longitude}';
       final waypoints = (chunk.length > 2)
           ? '&waypoints=${chunk.sublist(1, chunk.length - 1).map((p) => '${p.latitude},${p.longitude}').join('|')}'
           : '';
 
       final url =
           'https://maps.googleapis.com/maps/api/directions/json?origin=$origin&destination=$destination$waypoints&mode=driving&key=$_googleApiKey';
-
       final resp = await http.get(Uri.parse(url));
-      if (resp.statusCode != 200) {
-        throw Exception('Directions HTTP ${resp.statusCode}');
-      }
+      if (resp.statusCode != 200) throw Exception('Directions HTTP ${resp.statusCode}');
       final data = json.decode(resp.body);
       if (data['status'] != 'OK' || (data['routes'] as List).isEmpty) {
         throw Exception('Directions error: ${data['status']}');
       }
-
       final overview = data['routes'][0]['overview_polyline']['points'] as String;
       final decoded = _decodePolyline(overview);
-
-      // unir evitando duplicar el primer punto
-      if (resultPath.isNotEmpty && decoded.isNotEmpty) {
-        decoded.removeAt(0);
-      }
+      if (resultPath.isNotEmpty && decoded.isNotEmpty) decoded.removeAt(0);
       resultPath.addAll(decoded);
     }
 
@@ -210,13 +210,11 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
       final endExclusive = (start + maxPerRequest).clamp(0, puntos.length);
       final chunk = puntos.sublist(start, endExclusive);
       await fetchChunk(chunk);
-      start = endExclusive - 1; // solapar 1
+      start = endExclusive - 1;
     }
-
     return resultPath;
   }
 
-  // Decodificador de polylines (Google)
   List<LatLng> _decodePolyline(String encoded) {
     List<LatLng> poly = [];
     int index = 0, len = encoded.length;
@@ -232,7 +230,8 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
       int dlat = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
       lat += dlat;
 
-      shift = 0; result = 0;
+      shift = 0;
+      result = 0;
       do {
         b = encoded.codeUnitAt(index++) - 63;
         result |= (b & 0x1f) << shift;
@@ -254,7 +253,6 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
     try {
       await _mapController!.animateCamera(update);
     } catch (_) {
-      // si el mapa aún no tiene tamaño, reintenta en el próximo frame
       _pendingUpdate = update;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted || _mapController == null || _pendingUpdate == null) return;
@@ -267,17 +265,185 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
   }
 
   // =======================
-  // Recalcular & edición
+  // Edición de puntos
   // =======================
+  void _eliminarIndice(int index) async {
+    if (index < 0 || index >= _puntosRuta.length) return;
+    final pos = _puntosRuta[index];
+    final key = "${pos.latitude},${pos.longitude}";
+    _clientePorCoord.remove(key);
 
-  Future<void> _recalcularRuta() async {
-    if (_puntosRuta.length < 2) {
+    setState(() {
+      _puntosRuta.removeAt(index);
+    });
+    _rebuildDesdePuntos();
+    await _recalcularRuta();
+  }
+
+  void _moverPunto(int fromIndex, int toIndex) async {
+    if (fromIndex == toIndex) return;
+    if (fromIndex < 0 || fromIndex >= _puntosRuta.length) return;
+    if (toIndex < 0) toIndex = 0;
+    if (toIndex >= _puntosRuta.length) toIndex = _puntosRuta.length - 1;
+
+    final p = _puntosRuta.removeAt(fromIndex);
+    _puntosRuta.insert(toIndex, p);
+
+    final oldKey = "${p.latitude},${p.longitude}";
+    final cli = _clientePorCoord.remove(oldKey);
+    if (cli != null) _clientePorCoord[oldKey] = cli;
+
+    _rebuildDesdePuntos();
+    await _recalcularRuta();
+  }
+
+  Future<void> _agregarPuntoConCliente(LatLng pos) async {
+    final seleccionado = await Navigator.of(context).push<Map<String, dynamic>?>(
+      MaterialPageRoute(
+        builder: (_) => BuscarClientePage(posicion: pos),
+        fullscreenDialog: true,
+      ),
+    );
+
+    if (seleccionado == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Se necesitan al menos 2 puntos para recalcular la ruta.")),
+        const SnackBar(content: Text('Operación cancelada. No se agregó el punto.')),
       );
       return;
     }
 
+    String? direccion = seleccionado["direccion"];
+    if (direccion == null || direccion.trim().isEmpty) {
+      direccion = await _pedirDireccion(context);
+      if (direccion == null || direccion.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Debes ingresar una dirección para agregar el punto.')),
+        );
+        return;
+      }
+    }
+
+    setState(() {
+      _puntosRuta.add(pos);
+      final key = "${pos.latitude},${pos.longitude}";
+      _clientePorCoord[key] = {
+        "codigo": seleccionado["codigo"] ?? "",
+        "nombres": seleccionado["nombres"] ?? "",
+        "giro": seleccionado["giro"] ?? "",
+        "id_cliente": seleccionado["id_cliente"],
+        "direccion": direccion,
+      };
+    });
+
+    _rebuildDesdePuntos();
+    await _recalcularRuta();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Punto agregado para ${_clientePorCoord["${pos.latitude},${pos.longitude}"]?["nombres"] ?? "cliente"}')),
+    );
+  }
+
+  Future<String?> _pedirDireccion(BuildContext context) async {
+    final controller = TextEditingController();
+    return await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Dirección del punto"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: "Ejemplo: Av. Los Olivos 123",
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text("Guardar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarAccionesPunto(int index) {
+    final controller = TextEditingController(text: (index + 1).toString());
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Punto actual: ${index + 1} / ${_puntosRuta.length}",
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: "Nuevo orden (1..N)",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.swap_vert),
+                      label: const Text("Aplicar orden"),
+                      onPressed: () {
+                        final val = int.tryParse(controller.text.trim());
+                        if (val == null || val < 1 || val > _puntosRuta.length) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Ingresa un número válido.")),
+                          );
+                          return;
+                        }
+                        Navigator.pop(context);
+                        _moverPunto(index, val - 1);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text("Eliminar"),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _eliminarIndice(index);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _recalcularRuta() async {
+    if (_puntosRuta.length < 2) return;
     try {
       final puntos = _puntosRuta
           .map((p) => {"latitude": p.latitude, "longitude": p.longitude})
@@ -287,17 +453,13 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
         (puntos as List).cast<Map<String, double>>(),
       );
 
-      if (result != null) {
+      if (result != null && mounted) {
         setState(() {
-          _resumenSeleccionado!["distancia_opt_km"] = result["distancia_km"];
-          _resumenSeleccionado!["tiempo_opt_hor"] = result["tiempo_horas"];
+          _resumenSeleccionado?["distancia_opt_km"] = result["distancia_km"];
+          _resumenSeleccionado?["tiempo_opt_hor"] = result["tiempo_horas"];
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Ruta recalculada: ${result["distancia_km"]} km, ${result["tiempo_horas"]} h")),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No se pudo recalcular la ruta.")),
         );
       }
     } catch (e) {
@@ -307,120 +469,98 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
     }
   }
 
-  void _eliminarPunto(LatLng pos) async {
-    setState(() {
-      _puntosRuta.remove(pos);
-      _marcadores.removeWhere((m) => m.position == pos);
-    });
+Map<String, dynamic> _payloadTodasLasRutas() {
+  final resultados = <Map<String, dynamic>>[];
 
-    // Redibuja localmente (línea recta provisional)
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId("ruta_editada"),
-          points: _puntosRuta,
-          width: 4,
-        ),
+  for (final ruta in _listaRutas) {
+    final placa = ruta["placa"];
+    final nombreRuta = ruta["nombre"];
+    final puntosOriginales = (ruta["puntos"] as List).cast<Map<String, dynamic>>();
+
+    final puntosPayload = puntosOriginales.map((p) {
+      return {
+        "direccion": (p["direccion"] ?? "").toString(),
+        "latitude": (p["latitude"] as num).toDouble(),
+        "longitude": (p["longitude"] as num).toDouble(),
+        "cliente": (p["cliente"] ?? p["nombres"] ?? "").toString(),
+        "giro": (p["giro"] ?? "").toString(),
+        "codigo": (p["codigo"] ?? "").toString(),
       };
-    });
+    }).toList();
 
-    await _recalcularRuta();
-    // y vuelve a intentar trazo vial
-    _drawRoadPolyline();
-  }
-
-  // =======================
-  // Guardar en backend
-  // =======================
-
-  Map<String, dynamic> _payloadRutaSeleccionada() {
-    if (_rutaSeleccionada == null || _placaSeleccionada == null) {
-      throw Exception("No hay ruta o placa seleccionada");
-    }
-
-    final rutaOriginal =
-        _listaRutas.firstWhere((r) => r["nombre"] == _rutaSeleccionada);
-    final puntosOriginales =
-        (rutaOriginal["puntos"] as List).cast<Map<String, dynamic>>();
-
-    final Map<String, Map<String, dynamic>> porCoordenada = {};
-    for (final p in puntosOriginales) {
-      final key = "${p['latitude']},${p['longitude']}";
-      porCoordenada[key] = p;
-    }
-
-    final puntosPayload = <Map<String, dynamic>>[];
-    for (final pos in _puntosRuta) {
-      final key = "${pos.latitude},${pos.longitude}";
-      final base = porCoordenada[key];
-      puntosPayload.add({
-        "direccion": base?["direccion"] ?? "",
-        "latitude": pos.latitude,
-        "longitude": pos.longitude,
-        "cliente": base?["cliente"] ?? "",
-        "giro": base?["giro"] ?? "",
-        "codigo": base?["codigo"] ?? "", // tu backend ya acepta 'codigo'
-      });
-    }
-
-    return {
-      "resultados": [
-        {
-          "placa": _placaSeleccionada,
-          "rutas": [
-            {"nombre": _rutaSeleccionada, "puntos": puntosPayload},
-          ],
-        },
+    resultados.add({
+      "placa": placa,
+      "rutas": [
+        {"nombre": nombreRuta, "puntos": puntosPayload},
       ],
-    };
+    });
   }
 
-  Future<void> _guardarRutas() async {
-    if (_rutaSeleccionada == null ||
-        _placaSeleccionada == null ||
-        _puntosRuta.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Selecciona una ruta válida antes de guardar.")),
-      );
-      return;
-    }
+  return {"resultados": resultados};
+}
 
-    setState(() => _saving = true);
-    try {
-      final payload = _payloadRutaSeleccionada();
-      final res = await ApiService().guardarRutas(payload);
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res['message'] ?? 'Rutas guardadas correctamente')),
-      );
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AsignarRutasPage()),
-      );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      final code = e.statusCode;
-      final msg = (code == 401 || code == 403)
-          ? 'Sesión expirada. Inicia sesión de nuevo.'
-          : e.toString();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
+Future<void> _guardarRutas() async {
+  if (_listaRutas.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("No hay rutas disponibles para guardar.")),
+    );
+    return;
   }
+
+  setState(() => _saving = true);
+  try {
+    final payload = _payloadTodasLasRutas();
+    final res = await ApiService().guardarRutas(payload);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(res['message'] ?? 'Todas las rutas se guardaron correctamente')),
+    );
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const AsignarRutasPage()),
+    );
+  } on ApiException catch (e) {
+    if (!mounted) return;
+    final msg = (e.statusCode == 401 || e.statusCode == 403)
+        ? 'Sesión expirada. Inicia sesión de nuevo.'
+        : e.toString();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+  } finally {
+    if (mounted) setState(() => _saving = false);
+  }
+}
+
 
   // =======================
   // UI
   // =======================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Resultado de las rutas")),
+      floatingActionButton: _modoEditar
+          ? FloatingActionButton.extended(
+              icon: const Icon(Icons.add),
+              label: Text(_agregandoPunto ? "Toca el mapa..." : "Agregar punto"),
+              onPressed: () {
+                setState(() => _agregandoPunto = !_agregandoPunto);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      _agregandoPunto
+                          ? "Toca el mapa y luego selecciona/crea cliente."
+                          : "Agregar punto cancelado.",
+                    ),
+                  ),
+                );
+              },
+            )
+          : null,
       body: Column(
         children: [
           if (_resumenSeleccionado != null)
@@ -469,11 +609,10 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
                 ),
               ),
             ),
-
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: DropdownButtonFormField<String>(
-              initialValue: _rutaSeleccionada,
+              value: _rutaSeleccionada,
               items: _listaRutas.map((ruta) {
                 return DropdownMenuItem<String>(
                   value: ruta["nombre"],
@@ -490,7 +629,6 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
               ),
             ),
           ),
-
           Expanded(
             child: GoogleMap(
               mapType: MapType.normal,
@@ -511,9 +649,14 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
               ),
               markers: _marcadores,
               polylines: _polylines,
+              onTap: (pos) {
+                if (_modoEditar && _agregandoPunto) {
+                  setState(() => _agregandoPunto = false);
+                  _agregarPuntoConCliente(pos);
+                }
+              },
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
             child: Row(
@@ -524,12 +667,15 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
                     backgroundColor: _modoEditar ? Colors.orange : null,
                   ),
                   onPressed: () {
-                    setState(() => _modoEditar = !_modoEditar);
+                    setState(() {
+                      _modoEditar = !_modoEditar;
+                      if (!_modoEditar) _agregandoPunto = false;
+                    });
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
                           _modoEditar
-                              ? "Modo edición activado. Toca un punto para eliminarlo."
+                              ? "Modo edición: usa + para agregar; toca un punto para cambiar orden o eliminar."
                               : "Modo edición desactivado.",
                         ),
                       ),
@@ -545,7 +691,7 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text("Guardar ruta"),
+                      : const Text("Guardar rutas"),
                 ),
               ],
             ),

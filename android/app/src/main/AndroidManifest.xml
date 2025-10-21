@@ -2,8 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <!-- Opcional si quieres actualizaciones en 2º plano -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
         android:label="Aplicación DELTRANS"
@@ -38,6 +37,11 @@
             <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyCcYjVE_wGd9ir5-9kl81E5puvjf-mST5s" />
+
+            <meta-data
+    android:name="com.google.android.gms.maps.Renderer"
+    android:value="legacy" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
