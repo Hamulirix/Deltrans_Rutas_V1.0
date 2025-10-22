@@ -158,14 +158,14 @@ class UsuarioCreateDto {
     "estado": estado,
   };
 }
-
 class Camion {
   final int idCamion;
   final String placa;
   final String modelo;
   final String marca;
-  final int capacidadMax;
-  final String estado; // "Disponible" | "No disponible"
+  final int? capacidadMax; // 👈 puede venir nulo
+  final String estado;
+
   bool get disponible => estado.toLowerCase().startsWith('disponible');
 
   Camion({
@@ -173,19 +173,23 @@ class Camion {
     required this.placa,
     required this.modelo,
     required this.marca,
-    required this.capacidadMax,
+    this.capacidadMax,
     required this.estado,
   });
 
-  factory Camion.fromJson(Map<String, dynamic> j) => Camion(
-    idCamion: j['id_camion'],
-    placa: j['placa'],
-    modelo: j['modelo'],
-    marca: j['marca'],
-    capacidadMax: j['capacidad_max'],
-    estado: j['estado'],
-  );
+  factory Camion.fromJson(Map<String, dynamic> json) => Camion(
+        idCamion: int.tryParse(json['id_camion']?.toString() ?? '') ?? 0,
+        placa: json['placa'] ?? '',
+        modelo: json['modelo'] ?? '',
+        marca: json['marca'] ?? '',
+        capacidadMax: json['capacidad_max'] != null
+            ? int.tryParse(json['capacidad_max'].toString())
+            : null,
+        estado: json['estado'] ?? '',
+      );
 }
+
+
 
 class CamionCreateDto {
   final String placa;
@@ -256,14 +260,21 @@ class RutaResumen {
   });
 
   factory RutaResumen.fromJson(Map<String, dynamic> j) => RutaResumen(
-    idRuta: j['id_ruta'] as int,
-    fecha: j['fecha'] as String?,
-    nPuntos: (j['n_puntos'] ?? 0) as int,
-    primerPunto: j['primer_punto'] as String?,
-    ultimoPunto: j['ultimo_punto'] as String?,
-    estado: j['estado'] as int,
-    placa: j['placa'] as String?,
-  );
+  idRuta: j['id_ruta'] is int
+      ? j['id_ruta']
+      : int.tryParse(j['id_ruta']?.toString() ?? '') ?? 0,
+  fecha: j['fecha']?.toString(), // puede venir null
+  nPuntos: j['n_puntos'] is int
+      ? j['n_puntos']
+      : int.tryParse(j['n_puntos']?.toString() ?? '') ?? 0,
+  primerPunto: j['primer_punto']?.toString(),
+  ultimoPunto: j['ultimo_punto']?.toString(),
+  estado: j['estado'] is int
+      ? j['estado']
+      : int.tryParse(j['estado']?.toString() ?? '') ?? 0,
+  placa: j['placa']?.toString(),
+);
+
 }
 
 class PuntoRuta {
