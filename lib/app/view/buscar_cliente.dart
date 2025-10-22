@@ -20,6 +20,16 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
 
   Future<void> _buscar() async {
     final codigo = _codigoCtrl.text.trim();
+
+    // 🧩 Validar que el código no tenga letras
+    if (RegExp(r'[A-Za-z]').hasMatch(codigo)) {
+      setState(() {
+        _error = "El código no debe contener letras";
+        _cliente = null;
+      });
+      return;
+    }
+
     if (codigo.isEmpty) {
       setState(() {
         _cliente = null;
@@ -27,6 +37,7 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
       });
       return;
     }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -37,12 +48,8 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
       final c = await ApiService().buscarClientePorCodigo(codigo);
       setState(() {
         _cliente = c; // puede ser null si 404
+        if (c == null) _error = "Cliente no encontrado";
       });
-      if (c == null) {
-        setState(() {
-          _error = "Cliente no encontrado";
-        });
-      }
     } on ApiException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
@@ -93,6 +100,7 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
                       labelText: "Ingrese código de cliente",
                       border: OutlineInputBorder(),
                     ),
+                    keyboardType: TextInputType.text,
                     onSubmitted: (_) => _buscar(),
                   ),
                 ),
@@ -101,19 +109,20 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
                   onPressed: _loading ? null : _buscar,
                   icon: const Icon(Icons.search),
                   label: const Text("Buscar"),
-                )
+                ),
               ],
             ),
             const SizedBox(height: 16),
             if (_loading) const LinearProgressIndicator(),
-            if (_error != null) ...[
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: _irCrearCliente,
-                child: const Text("Añadir nuevo cliente"),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.red),
+                ),
               ),
-            ],
+            const SizedBox(height: 8),
             if (_cliente != null) ...[
               TextFormField(
                 readOnly: true,
@@ -132,19 +141,20 @@ class _BuscarClientePageState extends State<BuscarClientePage> {
                       child: const Text("Usar este cliente"),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _irCrearCliente,
-                      child: const Text("Añadir nuevo cliente"),
-                    ),
-                  ),
                 ],
               ),
-            ]
+            ],
           ],
         ),
       ),
+
+      // 🌟 Botón flotante visible siempre
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _irCrearCliente,
+        icon: const Icon(Icons.person_add),
+        label: const Text("Añadir nuevo cliente"),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }

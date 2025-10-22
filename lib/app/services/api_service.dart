@@ -446,6 +446,21 @@ class ApiService {
     }
   }
 
+
+  Future<int> obtenerTotalRutas() async {
+  final url = Uri.parse('$baseUrl/reportes/total-rutas');
+  final resp = await http.get(url, headers: await _jsonHeaders());
+
+  return _handleResponse<int>(resp, (json) {
+    if (json is Map && json['total_rutas'] != null) {
+      final v = json['total_rutas'];
+      return v is int ? v : int.tryParse(v.toString()) ?? 0;
+    }
+    return 0;
+  });
+}
+
+
   /// =============================
   /// Optimización con Excel
   /// =============================

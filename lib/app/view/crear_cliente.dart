@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 👈 Necesario para inputFormatters
 import 'package:flutter_application_1/app/services/api_service.dart';
 
 class CrearClientePage extends StatefulWidget {
@@ -36,9 +37,9 @@ class _CrearClientePageState extends State<CrearClientePage> {
 
     try {
       final res = await ApiService().crearCliente(
-        codigo: _codigoCtrl.text,
-        nombres: _nombresCtrl.text,
-        giro: _giroCtrl.text,
+        codigo: _codigoCtrl.text.trim(),
+        nombres: _nombresCtrl.text.trim(),
+        giro: _giroCtrl.text.trim(),
       );
       // devolver info mínima requerida por el mapa
       Navigator.pop<Map<String, dynamic>>(context, {
@@ -67,48 +68,92 @@ class _CrearClientePageState extends State<CrearClientePage> {
             key: _formKey,
             child: ListView(
               children: [
+                // 🧮 Código: solo números
                 TextFormField(
                   controller: _codigoCtrl,
                   decoration: const InputDecoration(
                     labelText: "Código",
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? "Requerido" : null,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return "Requerido";
+                    }
+                    if (!RegExp(r'^[0-9]+$').hasMatch(v)) {
+                      return "Solo se permiten números";
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
+
                 TextFormField(
                   controller: _nombresCtrl,
                   decoration: const InputDecoration(
                     labelText: "Nombres",
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? "Requerido" : null,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'[A-Za-zÁÉÍÓÚáéíóúÑñ\s]'),
+                    ),
+                  ],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return "Requerido";
+                    }
+                    if (!RegExp(r'^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$').hasMatch(v)) {
+                      return "Solo se permiten letras";
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
+
                 TextFormField(
                   controller: _giroCtrl,
                   decoration: const InputDecoration(
                     labelText: "Giro",
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? "Requerido" : null,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'[A-Za-zÁÉÍÓÚáéíóúÑñ\s]'),
+                    ),
+                  ],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return "Requerido";
+                    }
+                    if (!RegExp(r'^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$').hasMatch(v)) {
+                      return "Solo se permiten letras";
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
+
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
                   ),
+
                 ElevatedButton(
                   onPressed: _saving ? null : _guardar,
                   child: _saving
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Text("Añadir cliente"),
                 ),

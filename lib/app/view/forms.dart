@@ -10,40 +10,50 @@ class LabeledSwitch extends StatelessWidget {
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const LabeledSwitch({super.key, required this.label, required this.value, required this.onChanged});
+  const LabeledSwitch({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+        Expanded(
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        ),
         Switch(value: value, onChanged: onChanged),
       ],
     );
   }
 }
 
-InputDecoration _dec(String label, {String? hint, Widget? suffix}) => InputDecoration(
+InputDecoration _dec(String label, {String? hint, Widget? suffix}) =>
+    InputDecoration(
       labelText: label,
       hintText: hint,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       suffixIcon: suffix,
     );
 
-String? _req(String? v, {String msg = 'Campo obligatorio'}) => (v == null || v.trim().isEmpty) ? msg : null;
+String? _req(String? v, {String msg = 'Campo obligatorio'}) =>
+    (v == null || v.trim().isEmpty) ? msg : null;
 
 final _dniFormatter = FilteringTextInputFormatter.allow(RegExp(r'[0-9]'));
-final _placaFormatter = FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\\-]'));
+final _placaFormatter = FilteringTextInputFormatter.allow(
+  RegExp(r'[A-Za-z0-9\\-]'),
+);
 
-/// =======================================================
-/// FORM: USUARIO  (crear/editar)
-/// - Carga tipos desde /api/tipos-trabajador
-/// - Preselecciona tipo y camión con /api/usuarios/:id
-/// - En creación: muestra contraseña (obligatoria) y hace POST /api/register
-/// - En edición: sin contraseña y hace PUT /api/usuarios/:id
-/// =======================================================
+// ✅ Permite letras de todos los idiomas, incluidas ñ/Ñ y acentos
+final _soloTextoFormatter = FilteringTextInputFormatter.allow(
+  RegExp(r"[^\d\W_]", unicode: true),
+);
+final _soloTextoRegex = RegExp(r"^[^\d\W_]+(?:\s[^\d\W_]+)*$", unicode: true);
+
 class UsuarioFormPage extends StatefulWidget {
-  final int? usuarioId;                 // null => creación
-  final UsuarioUpdateDto? initial;      // opcional (fallback visual)
+  final int? usuarioId;
+  final UsuarioUpdateDto? initial;
 
   const UsuarioFormPage({super.key, this.usuarioId, this.initial});
 
@@ -59,10 +69,10 @@ class _UsuarioFormPageState extends State<UsuarioFormPage> {
   final _apellidos = TextEditingController();
   final _dni = TextEditingController();
   final _username = TextEditingController();
-  final _password = TextEditingController(); // SOLO creación
+  final _password = TextEditingController();
 
-  int? _idCamion;               // nullable
-  int? _idTipoTrabajador;       // requerido
+  int? _idCamion;
+  int? _idTipoTrabajador;
   bool _estado = true;
 
   bool _loading = false;
@@ -74,7 +84,6 @@ class _UsuarioFormPageState extends State<UsuarioFormPage> {
   @override
   void initState() {
     super.initState();
-    // fallback por si venimos de la lista con algo
     final i = widget.initial;
     if (i != null) {
       _nombres.text = i.nombres;
@@ -88,44 +97,41 @@ class _UsuarioFormPageState extends State<UsuarioFormPage> {
     _cargarData();
   }
 
-Future<void> _cargarData() async {
-  try {
-    setState(() => _loading = true);
+  Future<void> _cargarData() async {
+    try {
+      setState(() => _loading = true);
 
-    // 1) Si es edición, primero obtenemos el detalle para saber el camión actual
-    UsuarioDetalle? detalle;
-    if (widget.usuarioId != null) {
-      detalle = await _api.obtenerUsuarioDetalle(widget.usuarioId!);
-      // Pre-llenar campos
-      _nombres.text = detalle.nombres;
-      _apellidos.text = detalle.apellidos;
-      _dni.text = detalle.dni;
-      _username.text = detalle.username;
-      _estado = detalle.estado;
-      _idCamion = detalle.idCamion;            // <- preselección
-      _idTipoTrabajador = detalle.idTipoTrabajador;
+      UsuarioDetalle? detalle;
+      if (widget.usuarioId != null) {
+        detalle = await _api.obtenerUsuarioDetalle(widget.usuarioId!);
+        _nombres.text = detalle.nombres;
+        _apellidos.text = detalle.apellidos;
+        _dni.text = detalle.dni;
+        _username.text = detalle.username;
+        _estado = detalle.estado;
+        _idCamion = detalle.idCamion;
+        _idTipoTrabajador = detalle.idTipoTrabajador;
+      }
+
+      final results = await Future.wait([
+        _api.listarTiposTrabajador(),
+        _api.listarCamionesDisponibles(includeId: detalle?.idCamion),
+      ]);
+
+      setState(() {
+        _tipos = results[0] as List<TipoTrabajador>;
+        _camiones = results[1] as List<Camion>;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo cargar datos del formulario: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-
-    // 2) Traer tipos y CAMIONES DISPONIBLES (incluyendo el actual si aplica)
-    final results = await Future.wait([
-      _api.listarTiposTrabajador(),
-      _api.listarCamionesDisponibles(includeId: detalle?.idCamion),
-    ]);
-
-    setState(() {
-      _tipos = results[0] as List<TipoTrabajador>;
-      _camiones = results[1] as List<Camion>;
-      // _idCamion ya quedó con el actual (o null si creación).
-    });
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('No se pudo cargar datos del formulario: $e')));
-    }
-  } finally {
-    if (mounted) setState(() => _loading = false);
   }
-}
 
   @override
   void dispose() {
@@ -156,11 +162,15 @@ Future<void> _cargarData() async {
       try {
         final msg = await _api.actualizarUsuario(widget.usuarioId!, dto);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
         Navigator.of(context).maybePop();
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       } finally {
         if (mounted) setState(() => _loading = false);
@@ -182,12 +192,15 @@ Future<void> _cargarData() async {
       try {
         await _api.registrarUsuario(dto);
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Usuario creado con éxito')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuario creado con éxito')),
+        );
         Navigator.of(context).maybePop();
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       } finally {
         if (mounted) setState(() => _loading = false);
@@ -209,41 +222,73 @@ Future<void> _cargarData() async {
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: ListView(
               children: [
+                // 🧍‍♂️ Nombres: solo texto
                 TextFormField(
                   controller: _nombres,
                   decoration: _dec('Nombres'),
-                  validator: _req,
                   textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _apellidos,
-                  decoration: _dec('Apellidos'),
-                  validator: _req,
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _dni,
-                  decoration: _dec('DNI', hint: '8 dígitos'),
-                  inputFormatters: [_dniFormatter, LengthLimitingTextInputFormatter(12)],
-                  keyboardType: TextInputType.number,
+                  inputFormatters: [_soloTextoFormatter],
                   validator: (v) {
                     if (_req(v) != null) return 'Campo obligatorio';
-                    if ((v ?? '').length < 8) return 'Mínimo 8 dígitos';
+                    if (!_soloTextoRegex.hasMatch(v!.trim())) {
+                      return 'Solo se permiten letras y espacios';
+                    }
                     return null;
                   },
                 ),
+                const SizedBox(height: 12),
+
+                // 👨‍🦱 Apellidos: solo texto
+                TextFormField(
+                  controller: _apellidos,
+                  decoration: _dec('Apellidos'),
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: [_soloTextoFormatter],
+                  validator: (v) {
+                    if (_req(v) != null) return 'Campo obligatorio';
+                    if (!_soloTextoRegex.hasMatch(v!.trim())) {
+                      return 'Solo se permiten letras y espacios';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                // DNI sigue igual
+                TextFormField(
+                  controller: _dni,
+                  decoration: _dec('DNI', hint: '8 dígitos'),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly, // ✅ Solo números
+                    LengthLimitingTextInputFormatter(8), // ✅ Máximo 8 dígitos
+                  ],
+                  validator: (v) {
+                    if (_req(v) != null) return 'Campo obligatorio';
+                    final dni = v!.trim();
+                    if (dni.length != 8)
+                      return 'El DNI debe tener exactamente 8 dígitos';
+                    if (!RegExp(r'^\d{8}$').hasMatch(dni)) {
+                      return 'Solo se permiten números';
+                    }
+                    return null;
+                  },
+                ),
+
                 const SizedBox(height: 12),
 
                 // Tipo de trabajador
                 DropdownButtonFormField<int>(
                   initialValue: _idTipoTrabajador,
                   decoration: _dec('Tipo de trabajador'),
-                  items: _tipos.map((t) => DropdownMenuItem<int>(
-                        value: t.id,
-                        child: Text(t.nombre),
-                      )).toList(),
+                  items: _tipos
+                      .map(
+                        (t) => DropdownMenuItem<int>(
+                          value: t.id,
+                          child: Text(t.nombre),
+                        ),
+                      )
+                      .toList(),
                   onChanged: (v) => setState(() => _idTipoTrabajador = v),
                   validator: (v) => v == null ? 'Selecciona un tipo' : null,
                 ),
@@ -254,11 +299,16 @@ Future<void> _cargarData() async {
                   initialValue: _idCamion,
                   decoration: _dec('Camión asignado (opcional)'),
                   items: [
-                    const DropdownMenuItem<int?>(value: null, child: Text('— Sin camión —')),
-                    ..._camiones.map((c) => DropdownMenuItem<int?>(
-                          value: c.idCamion,
-                          child: Text('${c.placa} (${c.marca} ${c.modelo})'),
-                        )),
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('— Sin camión —'),
+                    ),
+                    ..._camiones.map(
+                      (c) => DropdownMenuItem<int?>(
+                        value: c.idCamion,
+                        child: Text('${c.placa} (${c.marca} ${c.modelo})'),
+                      ),
+                    ),
                   ],
                   onChanged: (v) => setState(() => _idCamion = v),
                 ),
@@ -281,15 +331,27 @@ Future<void> _cargarData() async {
                   ),
 
                 const SizedBox(height: 12),
-                LabeledSwitch(label: 'Estado', value: _estado, onChanged: (v) => setState(() => _estado = v)),
+                LabeledSwitch(
+                  label: 'Estado',
+                  value: _estado,
+                  onChanged: (v) => setState(() => _estado = v),
+                ),
                 const SizedBox(height: 16),
 
                 FilledButton.icon(
                   onPressed: _loading ? null : _submit,
                   icon: _loading
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.save),
-                  label: Text(_loading ? 'Guardando...' : (_esEdicion ? 'Guardar' : 'Guardar')),
+                  label: Text(
+                    _loading
+                        ? 'Guardando...'
+                        : (_esEdicion ? 'Guardar' : 'Guardar'),
+                  ),
                 ),
               ],
             ),
@@ -368,13 +430,18 @@ class _CamionFormPageState extends State<CamionFormPage> {
       try {
         final res = await _api.crearCamion(dto);
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('Creado: #${res['id_camion']} (${res['placa']})')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Creado: #${res['id_camion']} (${res['placa']})'),
+            ),
+          );
           Navigator.of(context).maybePop();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       } finally {
         if (mounted) setState(() => _loading = false);
@@ -395,12 +462,16 @@ class _CamionFormPageState extends State<CamionFormPage> {
       try {
         final msg = await _api.actualizarCamion(widget.initial!.idCamion, dto);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(msg)));
           Navigator.of(context).maybePop();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       } finally {
         if (mounted) setState(() => _loading = false);
@@ -411,7 +482,9 @@ class _CamionFormPageState extends State<CamionFormPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.initial == null ? 'Nuevo camión' : 'Editar camión')),
+      appBar: AppBar(
+        title: Text(widget.initial == null ? 'Nuevo camión' : 'Editar camión'),
+      ),
       body: AbsorbPointer(
         absorbing: _loading,
         child: Padding(
@@ -434,9 +507,24 @@ class _CamionFormPageState extends State<CamionFormPage> {
                   },
                 ),
                 const SizedBox(height: 12),
-                TextFormField(controller: _modelo, decoration: _dec('Modelo'), validator: _req),
+                TextFormField(
+                  controller: _modelo,
+                  decoration: _dec('Modelo'),
+                  validator: _req,
+                ),
                 const SizedBox(height: 12),
-                TextFormField(controller: _marca, decoration: _dec('Marca'), validator: _req),
+                TextFormField(
+                  controller: _marca,
+                  decoration: _dec('Marca'),
+                  inputFormatters: [_soloTextoFormatter],
+                  validator: (v) {
+                    if (_req(v) != null) return 'Campo obligatorio';
+                    if (!_soloTextoRegex.hasMatch(v!.trim())) {
+                      return 'Solo se permiten letras y espacios';
+                    }
+                    return null;
+                  },
+                ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _capacidad,
@@ -451,12 +539,20 @@ class _CamionFormPageState extends State<CamionFormPage> {
                   },
                 ),
                 const SizedBox(height: 12),
-                LabeledSwitch(label: 'Estado (disponible)', value: _estado, onChanged: (v) => setState(() => _estado = v)),
+                LabeledSwitch(
+                  label: 'Estado (disponible)',
+                  value: _estado,
+                  onChanged: (v) => setState(() => _estado = v),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   onPressed: _loading ? null : _submit,
                   icon: _loading
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.save),
                   label: Text(_loading ? 'Guardando...' : 'Guardar'),
                 ),
@@ -471,8 +567,10 @@ class _CamionFormPageState extends State<CamionFormPage> {
 
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) =>
-      newValue.copyWith(text: newValue.text.toUpperCase());
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) => newValue.copyWith(text: newValue.text.toUpperCase());
 }
 
 /// =======================================================
@@ -520,7 +618,9 @@ class _RutaFormPageState extends State<RutaFormPage> {
     try {
       final lista = await _api.listarCamiones();
       setState(() => _camiones = lista.where((c) => c.disponible).toList());
-    } catch (_) {/*silencio UI*/}
+    } catch (_) {
+      /*silencio UI*/
+    }
   }
 
   Future<void> _pickFecha() async {
@@ -541,7 +641,11 @@ class _RutaFormPageState extends State<RutaFormPage> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Este backend solo lista/da de baja rutas. Usa onSubmit para manejar creación/edición.')),
+      const SnackBar(
+        content: Text(
+          'Este backend solo lista/da de baja rutas. Usa onSubmit para manejar creación/edición.',
+        ),
+      ),
     );
   }
 
@@ -571,7 +675,10 @@ class _RutaFormPageState extends State<RutaFormPage> {
                         const SizedBox(width: 8),
                         Text(fechaText),
                         const Spacer(),
-                        TextButton(onPressed: _pickFecha, child: const Text('Cambiar')),
+                        TextButton(
+                          onPressed: _pickFecha,
+                          child: const Text('Cambiar'),
+                        ),
                       ],
                     ),
                   ),
@@ -581,13 +688,22 @@ class _RutaFormPageState extends State<RutaFormPage> {
                   initialValue: _idCamion,
                   decoration: _dec('Camión'),
                   items: _camiones
-                      .map((c) => DropdownMenuItem<int>(value: c.idCamion, child: Text('${c.placa} (${c.marca} ${c.modelo})')))
+                      .map(
+                        (c) => DropdownMenuItem<int>(
+                          value: c.idCamion,
+                          child: Text('${c.placa} (${c.marca} ${c.modelo})'),
+                        ),
+                      )
                       .toList(),
                   onChanged: (v) => setState(() => _idCamion = v),
                   validator: (v) => v == null ? 'Selecciona un camión' : null,
                 ),
                 const SizedBox(height: 12),
-                LabeledSwitch(label: 'Estado (activo)', value: _estado, onChanged: (v) => setState(() => _estado = v)),
+                LabeledSwitch(
+                  label: 'Estado (activo)',
+                  value: _estado,
+                  onChanged: (v) => setState(() => _estado = v),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   onPressed: _loading ? null : _submit,
@@ -598,7 +714,11 @@ class _RutaFormPageState extends State<RutaFormPage> {
                 OutlinedButton.icon(
                   onPressed: () async {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Para “dar de baja” usa ApiService.eliminarRuta(idRuta).')),
+                      const SnackBar(
+                        content: Text(
+                          'Para “dar de baja” usa ApiService.eliminarRuta(idRuta).',
+                        ),
+                      ),
                     );
                   },
                   icon: const Icon(Icons.delete_outline),

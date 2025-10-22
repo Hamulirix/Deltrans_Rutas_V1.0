@@ -2,10 +2,45 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app/view/asignar_rutas.dart';
 import 'package:flutter_application_1/app/view/optimizar_rutas.dart';
 import 'package:flutter_application_1/app/view/reportes_page.dart';
+import '../services/api_service.dart';
 
-class InicioGerente extends StatelessWidget {
+class InicioGerente extends StatefulWidget {
   final String nombre;
   const InicioGerente({super.key, required this.nombre});
+
+  @override
+  State<InicioGerente> createState() => _InicioGerenteState();
+}
+
+class _InicioGerenteState extends State<InicioGerente> {
+  final _api = ApiService();
+  int? _totalRutas;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarTotalRutas();
+  }
+
+  Future<void> _cargarTotalRutas() async {
+    try {
+      final total = await _api.obtenerTotalRutas();
+      if (mounted) {
+        setState(() {
+          _totalRutas = total;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cargar total de rutas: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,15 +52,10 @@ class InicioGerente extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Encabezado con logo y bienvenida
               _buildHeader(context),
               const SizedBox(height: 30),
-
-              // Tarjeta de estadísticas
               _buildStatsCard(context),
               const SizedBox(height: 30),
-
-              // Sección de acciones rápidas (solo móvil)
               _buildQuickActions(context),
             ],
           ),
@@ -36,7 +66,6 @@ class InicioGerente extends StatelessWidget {
 
   Widget _buildHeader(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -55,7 +84,7 @@ class InicioGerente extends StatelessWidget {
         ),
         const SizedBox(height: 5),
         Text(
-          "$nombre - Gerente",
+          "${widget.nombre} - Gerente",
           style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
@@ -79,18 +108,22 @@ class InicioGerente extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Número de rutas optimizadas",
+              "Número total de rutas registradas",
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
             ),
             const SizedBox(height: 15),
-            Text(
-              "25",
-              style: TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: primaryColor,
-              ),
-            ),
+            _loading
+                ? const Center(
+                    child: CircularProgressIndicator(),
+                  )
+                : Text(
+                    "${_totalRutas ?? 0}",
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor,
+                    ),
+                  ),
           ],
         ),
       ),
@@ -128,34 +161,28 @@ class InicioGerente extends StatelessWidget {
           context,
           "Optimizar rutas",
           Icons.trending_up,
-          () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const OptimizarRutasPage()),
-            );
-          },
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const OptimizarRutasPage()),
+          ),
         ),
         _buildActionButton(
           context,
           "Asignar rutas",
           Icons.assignment_turned_in,
-          () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const AsignarRutasPage()),
-            );
-          },
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AsignarRutasPage()),
+          ),
         ),
         _buildActionButton(
           context,
           "Reportes",
           Icons.assessment,
-          () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ReportesPage()),
-            );
-          },
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const ReportesPage()),
+          ),
         ),
       ],
     );
@@ -181,11 +208,7 @@ class InicioGerente extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 24,
-                color: primaryColor,
-              ),
+              Icon(icon, size: 24, color: primaryColor),
               const SizedBox(height: 8),
               Text(
                 text,
