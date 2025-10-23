@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_application_1/app/services/api_service.dart';
@@ -16,28 +15,6 @@ class OptimizarRutasPage extends StatefulWidget {
 class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
   final bool _isLoading = false;
   PlatformFile? _selectedFile;
-
-  // Prioridad seleccionada por el usuario
-  String _prioridadSeleccionada = "NINGUNO";
-
-  // Opciones que ve el usuario
-  final List<String> _opcionesPrioridad = [
-    "NINGUNO",
-    "PANADERIA",
-    "PUESTO DE MERCADO",
-    "BODEGA",
-  ];
-
-  String _getLabel(String value) {
-    switch (value) {
-      case "NINGUNO":
-        return "Ninguno (sin prioridad)";
-      case "PUESTO DE MERCADO":
-        return "Puesto de Mercado (PDM)";
-      default:
-        return value;
-    }
-  }
 
   Future<void> _pickFile() async {
     try {
@@ -75,10 +52,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
 
     try {
       final api = ApiService();
-      final result = await api.optimizeWithExcel(
-        file: File(_selectedFile!.path!),
-        prioridadGiro: _prioridadSeleccionada,
-      );
+      final result = await api.optimizeWithExcel(file: File(_selectedFile!.path!));
 
       if (mounted) Navigator.of(context).pop();
 
@@ -122,50 +96,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
               ),
               const SizedBox(height: 30),
 
-              // === ComboBox de prioridad (primero) ===
-              Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Priorizar tipo de cliente:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButton<String>(
-                        isExpanded: true,
-                        value: _prioridadSeleccionada,
-                        icon: const Icon(Icons.arrow_drop_down),
-                        elevation: 8,
-                        style: const TextStyle(color: Colors.black87, fontSize: 16),
-                        underline: Container(height: 1, color: Colors.grey),
-                        onChanged: (String? newValue) {
-                          if (newValue != null) {
-                            setState(() {
-                              _prioridadSeleccionada = newValue;
-                            });
-                          }
-                        },
-                        items: _opcionesPrioridad.map((String value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(_getLabel(value)),
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 30),
-
-              // Sección de subida de archivo
+              // === Sección de subida de archivo ===
               Card(
                 elevation: 3,
                 shape: RoundedRectangleBorder(
@@ -266,7 +197,7 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
               ),
               const SizedBox(height: 30),
 
-              // Botón de optimizar
+              // === Botón de optimizar ===
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

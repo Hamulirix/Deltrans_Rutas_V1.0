@@ -17,7 +17,7 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
 
   // Paginación
   int _paginaActual = 1;
-  final int _porPagina = 6; // cantidad de rutas por página
+  final int _porPagina = 6;
 
   // Búsqueda
   final TextEditingController _busquedaController = TextEditingController();
@@ -28,20 +28,26 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
     _cargarRutas();
   }
 
+  @override
+  void dispose() {
+    _busquedaController.dispose();
+    super.dispose();
+  }
+
   Future<void> _cargarRutas() async {
     try {
       setState(() => _loading = true);
       final lista = await _api.listarRutas();
+      if (!mounted) return;
       setState(() {
         _rutas = lista;
         _filtradas = lista;
       });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error cargando rutas: $e')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error cargando rutas: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -50,7 +56,7 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
   void _filtrar(String query) {
     query = query.toLowerCase();
     setState(() {
-      _paginaActual = 1; // volver al inicio
+      _paginaActual = 1;
       if (query.isEmpty) {
         _filtradas = _rutas;
       } else {
@@ -86,16 +92,13 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
       try {
         final msg = await _api.eliminarRuta(ruta.idRuta);
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         _cargarRutas();
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Error: $e')));
-        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
       }
     }
   }
@@ -164,9 +167,8 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                 ),
                                 child: ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: esActiva
-                                        ? Colors.green
-                                        : Colors.grey,
+                                    backgroundColor:
+                                        esActiva ? Colors.green : Colors.grey,
                                     child: const Icon(
                                       Icons.route,
                                       color: Colors.white,
@@ -184,32 +186,18 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                   trailing: PopupMenuButton<String>(
                                     onSelected: (value) async {
                                       if (value == 'editar') {
-                                        // 👇 Espera el resultado al cerrar la pantalla de edición
-                                        final actualizado =
-                                            await Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    EditarRutaMapaPage(
-                                                      idRuta: ruta.idRuta,
-                                                    ),
-                                              ),
-                                            );
-
-                                        // 👇 Si devolvió true, recarga las rutas
-                                        if (actualizado == true && mounted) {
-                                          await _cargarRutas();
-                                          if (!mounted)
-                                            return; // doble seguridad
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Ruta actualizada correctamente',
-                                              ),
+                                        // ✅ Simplemente navega y recarga al volver
+                                        await Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => EditarRutaMapaPage(
+                                              idRuta: ruta.idRuta,
                                             ),
-                                          );
+                                          ),
+                                        );
+
+                                        if (mounted) {
+                                          await _cargarRutas();
                                         }
                                       } else if (value == 'eliminar') {
                                         _confirmarEliminacion(context, ruta);
@@ -220,10 +208,8 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                         value: 'editar',
                                         child: Row(
                                           children: [
-                                            Icon(
-                                              Icons.edit,
-                                              color: Colors.blue,
-                                            ),
+                                            Icon(Icons.edit,
+                                                color: Colors.blue),
                                             SizedBox(width: 8),
                                             Text('Editar'),
                                           ],
@@ -233,10 +219,8 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                         value: 'eliminar',
                                         child: Row(
                                           children: [
-                                            Icon(
-                                              Icons.delete,
-                                              color: Colors.red,
-                                            ),
+                                            Icon(Icons.delete,
+                                                color: Colors.red),
                                             SizedBox(width: 8),
                                             Text('Eliminar'),
                                           ],
@@ -255,10 +239,8 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                 // Controles de paginación
                 if (_filtradas.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 8,
-                      horizontal: 16,
-                    ),
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [

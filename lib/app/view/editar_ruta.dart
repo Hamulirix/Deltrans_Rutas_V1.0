@@ -29,6 +29,13 @@ class _EditarRutaMapaPageState extends State<EditarRutaMapaPage> {
     _cargarDatosIniciales();
   }
 
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    _mapController = null;
+    super.dispose();
+  }
+
   DateTime? _parseFecha(String? fecha) {
     if (fecha == null) return null;
     final partes = fecha.split('/');
@@ -216,27 +223,27 @@ class _EditarRutaMapaPageState extends State<EditarRutaMapaPage> {
     );
   }
 
-  void _guardarYVolver() async {
-    try {
-      await _api.actualizarFechaRuta(
-        idRuta: widget.idRuta,
-        fecha: _fechaSeleccionada,
-      );
+void _guardarYVolver() async {
+  try {
+    await _api.actualizarFechaRuta(
+      idRuta: widget.idRuta,
+      fecha: _fechaSeleccionada,
+    );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ruta actualizada con éxito')),
-        );
-        Navigator.pop(context, true);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error guardando ruta: $e')));
-      }
-    }
+    if (!mounted) return;
+
+    // ✅ Solo muestra un feedback visual simple (sin Navigator.pop)
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ruta actualizada con éxito')),
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error guardando ruta: $e')),
+    );
   }
+}
+
 
   // =====================================================
   // NUEVO: Modal con opciones (Reordenar / Eliminar)
@@ -532,17 +539,21 @@ class _EditarRutaMapaPageState extends State<EditarRutaMapaPage> {
                             Future.delayed(
                               const Duration(milliseconds: 300),
                               () {
-                                controller.animateCamera(
-                                  CameraUpdate.newLatLngBounds(
-                                    _boundsFromLatLngList(puntos),
-                                    60,
-                                  ),
-                                );
+                                if (!mounted) return;
+                                try {
+                                  controller.animateCamera(
+                                    CameraUpdate.newLatLngBounds(
+                                      _boundsFromLatLngList(puntos),
+                                      60,
+                                    ),
+                                  );
+                                } catch (_) {}
                               },
                             );
                           }
                         }
                       },
+
                       onTap: _onMapTap,
                     ),
                   ),

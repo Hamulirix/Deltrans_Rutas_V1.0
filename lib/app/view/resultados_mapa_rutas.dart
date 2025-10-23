@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/app/view/asignar_rutas.dart';
 import 'package:flutter_application_1/app/view/buscar_cliente.dart';
 import 'package:flutter_application_1/core/constants.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_application_1/app/view/home.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 
@@ -472,6 +474,32 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
 Map<String, dynamic> _payloadTodasLasRutas() {
   final resultados = <Map<String, dynamic>>[];
 
+  if (_rutaSeleccionada != null) {
+  final rutaActiva = _listaRutas.firstWhere(
+    (r) => r["nombre"] == _rutaSeleccionada,
+    orElse: () => {},
+  );
+
+  if (rutaActiva.isNotEmpty) {
+    final nuevosPuntos = _puntosRuta.map((p) {
+      final key = "${p.latitude},${p.longitude}";
+      final cli = _clientePorCoord[key];
+      return {
+        "direccion": (cli?["direccion"] ?? "").toString(),
+        "latitude": p.latitude,
+        "longitude": p.longitude,
+        "cliente": (cli?["nombres"] ?? "").toString(),
+        "giro": (cli?["giro"] ?? "").toString(),
+        "codigo": (cli?["codigo"] ?? "").toString(),
+      };
+    }).toList();
+
+    rutaActiva["puntos"] = nuevosPuntos;
+    rutaActiva["total_puntos"] = nuevosPuntos.length;
+  }
+}
+
+
   for (final ruta in _listaRutas) {
     final placa = ruta["placa"];
     final nombreRuta = ruta["nombre"];
@@ -514,12 +542,29 @@ Future<void> _guardarRutas() async {
     final res = await ApiService().guardarRutas(payload);
 
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(res['message'] ?? 'Todas las rutas se guardaron correctamente')),
     );
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const AsignarRutasPage()),
+    // 🔹 Recuperar datos del login guardados en SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final nombre = prefs.getString("nombre") ?? "Usuario";
+    final rolId = prefs.getInt("id_tipo_trabajador") ?? 1;
+    final placa = prefs.getString("placa_camion");
+
+    final rol = (rolId == 1) ? "gerente" : "conductor";
+
+    // 🔹 Volver a Home, en la pestaña correspondiente
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => Home(
+          nombre: nombre,
+          rol: rol,
+          placaCamion: placa,
+        ),
+      ),
+      (route) => false,
     );
   } on ApiException catch (e) {
     if (!mounted) return;
@@ -534,6 +579,7 @@ Future<void> _guardarRutas() async {
     if (mounted) setState(() => _saving = false);
   }
 }
+
 
 
   // =======================

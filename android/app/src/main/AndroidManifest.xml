@@ -40,7 +40,7 @@
 
             <meta-data
     android:name="com.google.android.gms.maps.Renderer"
-    android:value="legacy" />
+    android:value="latest" />
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

@@ -461,12 +461,9 @@ class ApiService {
 }
 
 
-  /// =============================
-  /// Optimización con Excel
-  /// =============================
+  /// Optimización con Excel (sin prioridad_giro)
   Future<Map<String, dynamic>> optimizeWithExcel({
     required File file,
-    required String prioridadGiro,
   }) async {
     final token = await _getToken();
     if (token == null) throw ApiException("No autenticado");
@@ -475,17 +472,10 @@ class ApiService {
     final request = http.MultipartRequest("POST", uri);
     request.headers["Authorization"] = token;
 
-    // ✅ Solo enviamos lo necesario
-    request.fields["sheet_name"] = "Hoja1"; // tu backend lo usa
+    // Campos requeridos por tu backend
+    request.fields["sheet_name"] = "Hoja1";
 
-    // Mapeo para el backend
-    String valorBackend = prioridadGiro;
-    if (prioridadGiro == "PUESTO DE MERCADO") {
-      valorBackend = "PDM";
-    }
-    request.fields["prioridad_giro"] = valorBackend;
-
-    // Archivo
+    // Archivo Excel
     request.files.add(
       await http.MultipartFile.fromPath(
         "file",
@@ -505,6 +495,7 @@ class ApiService {
       (json) => json as Map<String, dynamic>,
     );
   }
+
 
   /// Guarda rutas optimizadas en el backend
   Future<Map<String, dynamic>> guardarRutas(
