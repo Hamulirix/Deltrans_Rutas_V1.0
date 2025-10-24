@@ -158,6 +158,7 @@ class UsuarioCreateDto {
     "estado": estado,
   };
 }
+
 class Camion {
   final int idCamion;
   final String placa;
@@ -178,18 +179,16 @@ class Camion {
   });
 
   factory Camion.fromJson(Map<String, dynamic> json) => Camion(
-        idCamion: int.tryParse(json['id_camion']?.toString() ?? '') ?? 0,
-        placa: json['placa'] ?? '',
-        modelo: json['modelo'] ?? '',
-        marca: json['marca'] ?? '',
-        capacidadMax: json['capacidad_max'] != null
-            ? int.tryParse(json['capacidad_max'].toString())
-            : null,
-        estado: json['estado'] ?? '',
-      );
+    idCamion: int.tryParse(json['id_camion']?.toString() ?? '') ?? 0,
+    placa: json['placa'] ?? '',
+    modelo: json['modelo'] ?? '',
+    marca: json['marca'] ?? '',
+    capacidadMax: json['capacidad_max'] != null
+        ? int.tryParse(json['capacidad_max'].toString())
+        : null,
+    estado: json['estado'] ?? '',
+  );
 }
-
-
 
 class CamionCreateDto {
   final String placa;
@@ -260,21 +259,20 @@ class RutaResumen {
   });
 
   factory RutaResumen.fromJson(Map<String, dynamic> j) => RutaResumen(
-  idRuta: j['id_ruta'] is int
-      ? j['id_ruta']
-      : int.tryParse(j['id_ruta']?.toString() ?? '') ?? 0,
-  fecha: j['fecha']?.toString(), // puede venir null
-  nPuntos: j['n_puntos'] is int
-      ? j['n_puntos']
-      : int.tryParse(j['n_puntos']?.toString() ?? '') ?? 0,
-  primerPunto: j['primer_punto']?.toString(),
-  ultimoPunto: j['ultimo_punto']?.toString(),
-  estado: j['estado'] is int
-      ? j['estado']
-      : int.tryParse(j['estado']?.toString() ?? '') ?? 0,
-  placa: j['placa']?.toString(),
-);
-
+    idRuta: j['id_ruta'] is int
+        ? j['id_ruta']
+        : int.tryParse(j['id_ruta']?.toString() ?? '') ?? 0,
+    fecha: j['fecha']?.toString(), // puede venir null
+    nPuntos: j['n_puntos'] is int
+        ? j['n_puntos']
+        : int.tryParse(j['n_puntos']?.toString() ?? '') ?? 0,
+    primerPunto: j['primer_punto']?.toString(),
+    ultimoPunto: j['ultimo_punto']?.toString(),
+    estado: j['estado'] is int
+        ? j['estado']
+        : int.tryParse(j['estado']?.toString() ?? '') ?? 0,
+    placa: j['placa']?.toString(),
+  );
 }
 
 class PuntoRuta {
@@ -382,7 +380,7 @@ class RutaConPuntos {
 class ApiService {
   /// Cambia la IP/host según tu entorno
   final String baseUrl =
-      "http://192.168.18.9:5000/api"; // Android emulator localhost
+      "https://craftiest-malodorous-tandra.ngrok-free.dev/api"; // Android emulator localhost
 
   /// =============================
   /// Helpers internos
@@ -446,25 +444,21 @@ class ApiService {
     }
   }
 
-
   Future<int> obtenerTotalRutas() async {
-  final url = Uri.parse('$baseUrl/reportes/total-rutas');
-  final resp = await http.get(url, headers: await _jsonHeaders());
+    final url = Uri.parse('$baseUrl/reportes/total-rutas');
+    final resp = await http.get(url, headers: await _jsonHeaders());
 
-  return _handleResponse<int>(resp, (json) {
-    if (json is Map && json['total_rutas'] != null) {
-      final v = json['total_rutas'];
-      return v is int ? v : int.tryParse(v.toString()) ?? 0;
-    }
-    return 0;
-  });
-}
-
+    return _handleResponse<int>(resp, (json) {
+      if (json is Map && json['total_rutas'] != null) {
+        final v = json['total_rutas'];
+        return v is int ? v : int.tryParse(v.toString()) ?? 0;
+      }
+      return 0;
+    });
+  }
 
   /// Optimización con Excel (sin prioridad_giro)
-  Future<Map<String, dynamic>> optimizeWithExcel({
-    required File file,
-  }) async {
+  Future<Map<String, dynamic>> optimizeWithExcel({required File file}) async {
     final token = await _getToken();
     if (token == null) throw ApiException("No autenticado");
 
@@ -495,7 +489,6 @@ class ApiService {
       (json) => json as Map<String, dynamic>,
     );
   }
-
 
   /// Guarda rutas optimizadas en el backend
   Future<Map<String, dynamic>> guardarRutas(
@@ -893,47 +886,43 @@ class ApiService {
     );
   }
 
-// Marca un punto como visitado para una ruta
-Future<Map<String, dynamic>> marcarPuntoVisitado({
-  required int idRuta,
-  required int idPunto,
-}) async {
-  final uri = Uri.parse('$baseUrl/ruta-punto/visitar');
+  // Marca un punto como visitado para una ruta
+  Future<Map<String, dynamic>> marcarPuntoVisitado({
+    required int idRuta,
+    required int idPunto,
+  }) async {
+    final uri = Uri.parse('$baseUrl/ruta-punto/visitar');
 
-  final resp = await http.put(
-    uri,
-    headers: await _jsonHeaders(withAuth: true),
-    body: jsonEncode({
-      'id_ruta': idRuta,
-      'id_punto': idPunto,
-    }),
-  );
+    final resp = await http.put(
+      uri,
+      headers: await _jsonHeaders(withAuth: true),
+      body: jsonEncode({'id_ruta': idRuta, 'id_punto': idPunto}),
+    );
 
-  return _handleResponse<Map<String, dynamic>>(
-    resp,
-    (json) => json as Map<String, dynamic>,
-  );
-}
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => json as Map<String, dynamic>,
+    );
+  }
 
-// Cambia el estado de la ruta (true=activa, false=inactiva)
-Future<Map<String, dynamic>> actualizarEstadoRuta({
-  required int idRuta,
-  required bool estado,
-}) async {
-  final uri = Uri.parse('$baseUrl/rutas/$idRuta/estado');
+  // Cambia el estado de la ruta (true=activa, false=inactiva)
+  Future<Map<String, dynamic>> actualizarEstadoRuta({
+    required int idRuta,
+    required bool estado,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rutas/$idRuta/estado');
 
-  final resp = await http.put(
-    uri,
-    headers: await _jsonHeaders(withAuth: true),
-    body: jsonEncode({'estado': estado}),
-  );
+    final resp = await http.put(
+      uri,
+      headers: await _jsonHeaders(withAuth: true),
+      body: jsonEncode({'estado': estado}),
+    );
 
-  return _handleResponse<Map<String, dynamic>>(
-    resp,
-    (json) => json as Map<String, dynamic>,
-  );
-}
-
+    return _handleResponse<Map<String, dynamic>>(
+      resp,
+      (json) => json as Map<String, dynamic>,
+    );
+  }
 
   Future<Map<String, dynamic>> obtenerReportes({
     required int idCamion,
