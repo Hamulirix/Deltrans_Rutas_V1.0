@@ -161,41 +161,48 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   // ============================
   // Tracking en tiempo real
   // ============================
-  Future<void> _iniciarSeguimientoTiempoReal() async {
-    if (_puntos.isEmpty) return;
+Future<void> _iniciarSeguimientoTiempoReal() async {
+  if (_puntos.isEmpty) return;
 
-    _posSub?.cancel();
-    _posSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      ),
-    ).listen((pos) async {
-      _posicionActual = LatLng(pos.latitude, pos.longitude);
-      _actualizarMarcadorYo();
+  _posSub?.cancel();
 
-      if (_puntoActual != null) {
-        final destino =
-            LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
+  bool procesandoLlegada = false;
+  final Set<int> puntosVisitados = {};
 
-        // Redibuja navegación (polyline) y ajusta cámara
-        await _trazarRuta(_posicionActual!, destino);
-        await _ajustarCamara(_posicionActual!, _puntoActual!);
+  _posSub = Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.best,
+      distanceFilter: 5,
+    ),
+  ).listen((pos) async {
+    _posicionActual = LatLng(pos.latitude, pos.longitude);
+    _actualizarMarcadorYo();
 
-        // ¿Llegó?
-        final dist = Geolocator.distanceBetween(
-          _posicionActual!.latitude,
-          _posicionActual!.longitude,
-          destino.latitude,
-          destino.longitude,
-        );
+    if (_puntoActual == null || procesandoLlegada) return;
 
-        if (dist < 40) {
-          await _onLlegadaAPunto(_puntoActual!);
-        }
-      }
-    });
-  }
+    final destino = LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
+
+    // Actualiza el trazado
+    await _trazarRuta(_posicionActual!, destino);
+    await _ajustarCamara(_posicionActual!, _puntoActual!);
+
+    final dist = Geolocator.distanceBetween(
+      _posicionActual!.latitude,
+      _posicionActual!.longitude,
+      destino.latitude,
+      destino.longitude,
+    );
+
+    if (dist < 40 && !puntosVisitados.contains(_puntoActual!.idPunto)) {
+      procesandoLlegada = true; // 🔒 evita ejecuciones paralelas
+      puntosVisitados.add(_puntoActual!.idPunto);
+
+      await _onLlegadaAPunto(_puntoActual!);
+
+      procesandoLlegada = false; // 🔓 vuelve a permitir nuevas llegadas
+    }
+  });
+}
 
   // Al llegar a un punto
   Future<void> _onLlegadaAPunto(PuntoRutaDet punto) async {

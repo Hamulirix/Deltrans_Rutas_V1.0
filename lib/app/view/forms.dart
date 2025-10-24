@@ -47,9 +47,15 @@ final _placaFormatter = FilteringTextInputFormatter.allow(
 
 // ✅ Permite letras de todos los idiomas, incluidas ñ/Ñ y acentos
 final _soloTextoFormatter = FilteringTextInputFormatter.allow(
-  RegExp(r"[^\d\W_]", unicode: true),
+  RegExp(r"[A-Za-z\u00C0-\u024F\u1E00-\u1EFF \u00A0\-']", unicode: true),
 );
-final _soloTextoRegex = RegExp(r"^[^\d\W_]+(?:\s[^\d\W_]+)*$", unicode: true);
+
+final _soloTextoRegex = RegExp(
+  r"^[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]+(?:[ \u00A0\-'][A-Za-z\u00C0-\u024F\u1E00-\u1EFF]+)*$",
+  unicode: true,
+);
+
+
 
 class UsuarioFormPage extends StatefulWidget {
   final int? usuarioId;
