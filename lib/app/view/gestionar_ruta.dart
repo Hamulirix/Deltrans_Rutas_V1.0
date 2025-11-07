@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/app/view/agregar_ruta.dart';
 import 'package:flutter_application_1/app/view/editar_ruta.dart';
 import 'package:flutter_application_1/app/view/mapa_ubicacion.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -123,6 +124,19 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Gestionar Rutas')),
+
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final resultado = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CrearRutaMapaPage()),
+          );
+          if (resultado == true && mounted) _cargarRutas();
+        },
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        child: const Icon(Icons.add),
+      ),
+
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -235,10 +249,9 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                     icon: const Icon(Icons.more_vert),
                                   ),
 
-                                  // ✅ Aquí está lo nuevo:
+                                  // Mostrar mapa con puntos de la ruta
                                   onTap: () async {
                                     try {
-                                      // Obtiene los puntos de la ruta desde tu API
                                       final puntosRuta = await _api
                                           .listarPuntosDeRuta(ruta.idRuta);
 
@@ -255,12 +268,10 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                         return;
                                       }
 
-                                      // Convierte tus puntos a LatLng
                                       final puntos = puntosRuta
                                           .map((p) => LatLng(p.lat, p.lng))
                                           .toList();
 
-                                      // Abre el mapa reutilizando tu MapaUbicacionPage
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(

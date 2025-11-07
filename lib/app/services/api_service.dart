@@ -750,6 +750,28 @@ class ApiService {
     });
   }
 
+
+Future<Map<String, dynamic>> crearRuta({
+  required int idCamion,
+  String? fecha,
+  required List<Map<String, dynamic>> puntos,
+}) async {
+  final uri = Uri.parse("$baseUrl/rutas");
+  final headers = await _jsonHeaders(withAuth: true);
+
+  final resp = await http.post(
+    uri,
+    headers: headers,
+    body: jsonEncode({
+      "id_camion": idCamion,
+      "fecha": fecha,
+      "puntos": puntos,
+    }),
+  );
+
+  return _handleResponse<Map<String, dynamic>>(resp, (json) => json as Map<String, dynamic>);
+}
+
   Future<List<PuntoRuta>> listarPuntosDeRuta(int idRuta) async {
     final resp = await http.get(
       Uri.parse("$baseUrl/rutas/$idRuta/puntos"),
