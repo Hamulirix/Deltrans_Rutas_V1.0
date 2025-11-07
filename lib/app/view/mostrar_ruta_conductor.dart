@@ -1,14 +1,11 @@
 // mostrar_ruta_conductor.dart
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 
 import 'package:flutter_application_1/app/services/api_service.dart';
-import 'package:flutter_application_1/core/constants.dart';
 
 class MostrarRutaConductorPage extends StatefulWidget {
   final String placa;
@@ -39,14 +36,16 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   int _indexActual = 0;
   PuntoRutaDet? get _puntoActual =>
       (_indexActual >= 0 && _indexActual < _puntos.length)
-          ? _puntos[_indexActual]
-          : null;
+      ? _puntos[_indexActual]
+      : null;
 
   // Ubicación
   LatLng? _posicionActual;
 
+  // Polyline actual
+  List<LatLng> _polylinePoints = [];
+
   bool _cargando = true;
-  static const _GOOGLE_API_KEY = AppConfig.googleMapsApiKey;
 
   @override
   void initState() {
@@ -70,15 +69,33 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
         fecha: widget.fecha,
       );
 
+      final desvios = await _api.listarDesviosActivos();
+
       setState(() {
         _idRuta = r.idRuta;
         _puntos = [...r.puntos]..sort((a, b) => a.orden.compareTo(b.orden));
         _indexActual = 0;
         _cargando = false;
+
+        // 👇 Dibujar desvíos (incidentes activos)
+        for (final d in desvios) {
+          _markers.add(
+            Marker(
+              markerId: MarkerId('desvio_${d.lat}_${d.lng}'),
+              position: LatLng(d.lat, d.lng),
+
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueOrange,
+              ),
+              infoWindow: const InfoWindow(title: 'Zona con incidente'),
+            ),
+          );
+        }
       });
 
       await _obtenerUbicacionActual();
       _dibujarMarcadoresPuntos();
+
       if (_posicionActual != null && _puntoActual != null) {
         await _trazarRuta(
           _posicionActual!,
@@ -86,11 +103,13 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
         );
         await _ajustarCamara(_posicionActual!, _puntoActual!);
       }
+
       await _iniciarSeguimientoTiempoReal();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
       setState(() => _cargando = false);
     }
   }
@@ -124,12 +143,14 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   void _actualizarMarcadorYo() {
     if (_posicionActual == null) return;
     _markers.removeWhere((m) => m.markerId == const MarkerId('yo'));
-    _markers.add(Marker(
-      markerId: const MarkerId('yo'),
-      position: _posicionActual!,
-      infoWindow: const InfoWindow(title: 'Tu ubicación'),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-    ));
+    _markers.add(
+      Marker(
+        markerId: const MarkerId('yo'),
+        position: _posicionActual!,
+        infoWindow: const InfoWindow(title: 'Tu ubicación'),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      ),
+    );
     setState(() {});
   }
 
@@ -143,68 +164,160 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
       final hue = i == 0
           ? BitmapDescriptor.hueGreen
           : (i == _puntos.length - 1
-              ? BitmapDescriptor.hueRed
-              : BitmapDescriptor.hueRose);
-      _markers.add(Marker(
-        markerId: MarkerId('p_${p.idPunto}'),
-        position: LatLng(p.latitud, p.longitud),
-        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-        infoWindow: InfoWindow(
-          title: '#${p.orden} • ${p.cliente.nombres}',
-          snippet: '${p.direccion} • ${p.cliente.giro}',
+                ? BitmapDescriptor.hueRed
+                : BitmapDescriptor.hueRose);
+      _markers.add(
+        Marker(
+          markerId: MarkerId('p_${p.idPunto}'),
+          position: LatLng(p.latitud, p.longitud),
+          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+          infoWindow: InfoWindow(
+            title: '#${p.orden} • ${p.cliente.nombres}',
+            snippet: '${p.direccion} • ${p.cliente.giro}',
+          ),
         ),
-      ));
+      );
     }
     setState(() {});
   }
 
   // ============================
-  // Tracking en tiempo real
+  // Seguimiento en tiempo real
   // ============================
-Future<void> _iniciarSeguimientoTiempoReal() async {
-  if (_puntos.isEmpty) return;
+  Future<void> _iniciarSeguimientoTiempoReal() async {
+    if (_puntos.isEmpty) return;
 
-  _posSub?.cancel();
+    _posSub?.cancel();
 
-  bool procesandoLlegada = false;
-  final Set<int> puntosVisitados = {};
+    bool procesandoLlegada = false;
+    final Set<int> puntosVisitados = {};
 
-  _posSub = Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      distanceFilter: 5,
-    ),
-  ).listen((pos) async {
-    _posicionActual = LatLng(pos.latitude, pos.longitude);
-    _actualizarMarcadorYo();
+    _posSub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            distanceFilter: 5,
+          ),
+        ).listen((pos) async {
+          _posicionActual = LatLng(pos.latitude, pos.longitude);
+          _actualizarMarcadorYo();
 
-    if (_puntoActual == null || procesandoLlegada) return;
+          if (_puntoActual == null || procesandoLlegada) return;
 
-    final destino = LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
+          // 🚨 Detectar desvío del Polyline
+          if (_polylinePoints.isNotEmpty) {
+            final distMin = _distanciaMinimaAPolyline(
+              _posicionActual!,
+              _polylinePoints,
+            );
+            if (distMin > 60) {
+              // más de 60 metros fuera del camino
+              _posSub?.pause();
+              await _mostrarModalDesvio();
+              _posSub?.resume();
+            }
+          }
 
-    // Actualiza el trazado
-    await _trazarRuta(_posicionActual!, destino);
-    await _ajustarCamara(_posicionActual!, _puntoActual!);
+          final destino = LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
 
-    final dist = Geolocator.distanceBetween(
-      _posicionActual!.latitude,
-      _posicionActual!.longitude,
-      destino.latitude,
-      destino.longitude,
+          // Actualiza el trazado
+          await _trazarRuta(_posicionActual!, destino);
+          await _ajustarCamara(_posicionActual!, _puntoActual!);
+
+          final dist = Geolocator.distanceBetween(
+            _posicionActual!.latitude,
+            _posicionActual!.longitude,
+            destino.latitude,
+            destino.longitude,
+          );
+
+          if (dist < 40 && !puntosVisitados.contains(_puntoActual!.idPunto)) {
+            procesandoLlegada = true;
+            puntosVisitados.add(_puntoActual!.idPunto);
+            await _onLlegadaAPunto(_puntoActual!);
+            procesandoLlegada = false;
+          }
+        });
+  }
+
+  double _distanciaMinimaAPolyline(LatLng p, List<LatLng> polyline) {
+    double minDist = double.infinity;
+    for (int i = 0; i < polyline.length - 1; i++) {
+      double d = Geolocator.distanceBetween(
+        p.latitude,
+        p.longitude,
+        polyline[i].latitude,
+        polyline[i].longitude,
+      );
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  }
+
+  // ============================
+  // Modal de desvío
+  // ============================
+  Future<void> _mostrarModalDesvio() async {
+    if (!mounted) return;
+
+    String? motivo = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Desvío detectado'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Parece que te desviaste de la ruta. ¿Cuál fue el motivo?',
+            ),
+            const SizedBox(height: 10),
+            for (final m in [
+              'Calle cerrada',
+              'Mucho tráfico',
+              'Desvío por obras',
+              'Otro',
+            ])
+              ListTile(title: Text(m), onTap: () => Navigator.pop(context, m)),
+          ],
+        ),
+      ),
     );
 
-    if (dist < 40 && !puntosVisitados.contains(_puntoActual!.idPunto)) {
-      procesandoLlegada = true; // 🔒 evita ejecuciones paralelas
-      puntosVisitados.add(_puntoActual!.idPunto);
+    if (motivo != null && _idRuta != null && _posicionActual != null) {
+      await _api.registrarDesvio(
+        idRuta: _idRuta!,
+        motivo: motivo,
+        lat: _posicionActual!.latitude,
+        lng: _posicionActual!.longitude,
+      );
 
-      await _onLlegadaAPunto(_puntoActual!);
+      _toast('Desvío registrado: $motivo');
 
-      procesandoLlegada = false; // 🔓 vuelve a permitir nuevas llegadas
+      // Agregar marcador visual del desvío
+      _markers.add(
+        Marker(
+          markerId: MarkerId('desvio_${DateTime.now().millisecondsSinceEpoch}'),
+          position: _posicionActual!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange,
+          ),
+          infoWindow: InfoWindow(title: 'Desvío: $motivo'),
+        ),
+      );
+
+      // Recalcular la ruta desde donde está hacia el siguiente punto
+      if (_puntoActual != null) {
+        await _trazarRuta(
+          _posicionActual!,
+          LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
+        );
+      }
     }
-  });
-}
+  }
 
-  // Al llegar a un punto
+  // ============================
+  // Llegada a un punto
+  // ============================
   Future<void> _onLlegadaAPunto(PuntoRutaDet punto) async {
     _toast('Llegaste a ${punto.cliente.nombres}');
     try {
@@ -222,13 +335,9 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
     if (_indexActual < _puntos.length - 1) {
       setState(() => _indexActual++);
       final sig = _puntoActual!;
-      await _trazarRuta(
-        _posicionActual!,
-        LatLng(sig.latitud, sig.longitud),
-      );
+      await _trazarRuta(_posicionActual!, LatLng(sig.latitud, sig.longitud));
       await _ajustarCamara(_posicionActual!, sig);
     } else {
-      // Terminado: inactivar ruta y volver
       try {
         if (_idRuta != null) {
           await _api.actualizarEstadoRuta(idRuta: _idRuta!, estado: false);
@@ -237,7 +346,7 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
         _toast('No pude marcar la ruta como finalizada: $e');
       }
       _toast('Ruta completada');
-      if (mounted) Navigator.of(context).pop(); // volver a la pantalla anterior
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
@@ -246,51 +355,26 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
   // ============================
   Future<void> _trazarRuta(LatLng origen, LatLng destino) async {
     try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${origen.latitude},${origen.longitude}'
-        '&destination=${destino.latitude},${destino.longitude}'
-        '&mode=driving&language=es&key=$_GOOGLE_API_KEY',
+      final pts = await _api.trazarRutaEvitarDesvios(
+        origen: origen,
+        destino: destino,
       );
-      final resp = await http.get(url);
-      if (resp.statusCode != 200) return;
-      final data = jsonDecode(resp.body);
-      if (data['status'] != 'OK') return;
-
-      final encoded = data['routes'][0]['overview_polyline']['points'] as String;
-      final pts = _decodePolyline(encoded);
+      _polylinePoints = pts;
 
       _polylines
         ..removeWhere((p) => p.polylineId == const PolylineId('nav'))
-        ..add(Polyline(
-          polylineId: const PolylineId('nav'),
-          points: pts,
-          width: 6,
-          color: Colors.blue,
-        ));
+        ..add(
+          Polyline(
+            polylineId: const PolylineId('nav'),
+            points: pts,
+            width: 6,
+            color: Colors.blue,
+          ),
+        );
       setState(() {});
-    } catch (_) {}
-  }
-
-  List<LatLng> _decodePolyline(String encoded) {
-    final List<LatLng> poly = [];
-    int index = 0, lat = 0, lng = 0;
-    while (index < encoded.length) {
-      int b, shift = 0, result = 0;
-      do { b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift; shift += 5;
-      } while (b >= 0x20);
-      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lat += dlat;
-      shift = 0; result = 0;
-      do { b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift; shift += 5;
-      } while (b >= 0x20);
-      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lng += dlng;
-      poly.add(LatLng(lat / 1e5, lng / 1e5));
+    } catch (e) {
+      _toast('Error al trazar ruta: $e');
     }
-    return poly;
   }
 
   Future<void> _ajustarCamara(LatLng origen, PuntoRutaDet destino) async {
@@ -299,7 +383,6 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
         : Future<GoogleMapController?>.value(null));
     if (ctrl == null) return;
 
-    // Bounds entre tu ubicación y el destino actual
     final bounds = LatLngBounds(
       southwest: LatLng(
         math.min(origen.latitude, destino.latitud),
@@ -342,7 +425,6 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
                   },
                 ),
 
-                // Ventana de info del cliente actual
                 if (_puntoActual != null)
                   Positioned(
                     top: 28,
@@ -365,9 +447,10 @@ Future<void> _iniciarSeguimientoTiempoReal() async {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text('Orden: ${_puntoActual!.orden}',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
+                          Text(
+                            'Orden: ${_puntoActual!.orden}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           Text('Código: ${_puntoActual!.cliente.codigo}'),
                           Text('Cliente: ${_puntoActual!.cliente.nombres}'),
                           Text('Giro: ${_puntoActual!.cliente.giro}'),

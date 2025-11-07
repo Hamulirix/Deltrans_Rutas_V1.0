@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app/view/asignar_rutas.dart';
+import 'package:flutter_application_1/app/view/gestionar_incidencias.dart';
 import 'package:flutter_application_1/app/view/optimizar_rutas.dart';
 import 'package:flutter_application_1/app/view/reportes_page.dart';
 import '../services/api_service.dart';
@@ -152,10 +153,10 @@ class _InicioGerenteState extends State<InicioGerente> {
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3,
+      crossAxisCount: 2,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
-      childAspectRatio: 0.8,
+      childAspectRatio: 1.1,
       children: [
         _buildActionButton(
           context,
@@ -184,6 +185,16 @@ class _InicioGerenteState extends State<InicioGerente> {
             MaterialPageRoute(builder: (context) => const ReportesPage()),
           ),
         ),
+        _buildActionButton(
+          context,
+          "Incidencias",
+          Icons.warning,
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const GestionarIncidenciasPage()),
+          ),
+        ),
+
       ],
     );
   }

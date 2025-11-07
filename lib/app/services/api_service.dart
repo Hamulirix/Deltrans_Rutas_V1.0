@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 /// Excepción HTTP legible
 class ApiException extends HttpException {
   final int? statusCode;
@@ -374,17 +374,51 @@ class RutaConPuntos {
   );
 }
 
-/// =============================
-/// Servicio de API
-/// =============================
-class ApiService {
-  /// Cambia la IP/host según tu entorno
-  final String baseUrl =
-      "https://craftiest-malodorous-tandra.ngrok-free.dev/api"; // Android emulator localhost
+class Desvio {
+  final int idDesvio;
+  final String motivo;
+  final double lat;
+  final double lng;
+  final double? latMin;
+  final double? latMax;
+  final double? lngMin;
+  final double? lngMax;
+  final String estado;
 
-  /// =============================
-  /// Helpers internos
-  /// =============================
+  Desvio({
+    required this.idDesvio,
+    required this.motivo,
+    required this.lat,
+    required this.lng,
+    this.latMin,
+    this.latMax,
+    this.lngMin,
+    this.lngMax,
+    required this.estado,
+  });
+
+  factory Desvio.fromJson(Map<String, dynamic> j) => Desvio(
+        idDesvio: j['id_desvio'] ?? 0,
+        motivo: j['motivo'] ?? '',
+        lat: (j['latitud'] as num).toDouble(),
+        lng: (j['longitud'] as num).toDouble(),
+        latMin: j['lat_min'] != null ? (j['lat_min'] as num).toDouble() : null,
+        latMax: j['lat_max'] != null ? (j['lat_max'] as num).toDouble() : null,
+        lngMin: j['lng_min'] != null ? (j['lng_min'] as num).toDouble() : null,
+        lngMax: j['lng_max'] != null ? (j['lng_max'] as num).toDouble() : null,
+        estado: j['estado']?.toString() ?? 'Desconocido',
+      );
+}
+
+
+
+
+class ApiService {
+
+  final String baseUrl =
+      "https://craftiest-malodorous-tandra.ngrok-free.dev/api"; 
+
+
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString("jwt_token");
@@ -395,7 +429,7 @@ class ApiService {
     if (withAuth) {
       final token = await _getToken();
       if (token == null) throw ApiException("No autenticado");
-      // OJO: tu backend espera el token sin "Bearer "
+
       headers["Authorization"] = token;
     }
     return headers;
@@ -958,9 +992,6 @@ class ApiService {
       '$baseUrl/clientes/buscar?codigo=${Uri.encodeQueryComponent(codigoTrim)}',
     );
 
-    // Opción 2 (alternativa equivalente):
-    // final uri = Uri.parse('$baseUrl/api/clientes/buscar')
-    //     .replace(queryParameters: {'codigo': codigoTrim});
 
     final resp = await http.get(uri, headers: await _jsonHeaders());
 
@@ -1004,4 +1035,146 @@ class ApiService {
       );
     }
   }
+
+    /// Registra un desvío detectado durante la ruta del conductor
+Future<Map<String, dynamic>> registrarDesvio({
+  required int idRuta,
+  required String motivo,
+  required double lat,
+  required double lng,
+}) async {
+  final uri = Uri.parse("$baseUrl/rutas/$idRuta/desvio");
+  final headers = await _jsonHeaders(withAuth: true);
+
+  final body = jsonEncode({
+    "motivo": motivo,
+    "lat": lat,
+    "lng": lng,
+  });
+
+  final resp = await http.post(uri, headers: headers, body: body);
+
+  if (resp.statusCode == 401 || resp.statusCode == 403) {
+    final data = _decodeBody(resp);
+    final msg = (data is Map && data['error'] != null)
+        ? data['error'].toString()
+        : 'Sesión expirada o no autorizada';
+    throw ApiException(msg, statusCode: resp.statusCode);
+  }
+
+  return _handleResponse<Map<String, dynamic>>(
+    resp,
+    (json) => json as Map<String, dynamic>,
+  );
+}
+
+
+    /// 📋 Listar todas las incidencias (desvíos)
+  Future<List<Desvio>> listarDesvios() async {
+    final uri = Uri.parse("$baseUrl/desvios");
+    final headers = await _jsonHeaders(withAuth: true);
+
+    final resp = await http.get(uri, headers: headers);
+
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      final data = _decodeBody(resp);
+      final msg = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : 'Sesión expirada o no autorizada';
+      throw ApiException(msg, statusCode: resp.statusCode);
+    }
+
+    return _handleResponse<List<Desvio>>(
+      resp,
+      (json) => (json as List)
+          .map((e) => Desvio.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// 🔻 Dar de baja (estado = 0)
+  Future<String> darBajaDesvio(int idDesvio) async {
+    final uri = Uri.parse("$baseUrl/desvios/$idDesvio/baja");
+    final headers = await _jsonHeaders(withAuth: true);
+    final resp = await http.delete(uri, headers: headers);
+
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      final data = _decodeBody(resp);
+      final msg = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : 'Sesión expirada o no autorizada';
+      throw ApiException(msg, statusCode: resp.statusCode);
+    }
+
+    final data = _decodeBody(resp);
+    if (resp.statusCode == 200 && data is Map && data['message'] != null) {
+      return data['message'].toString();
+    }
+    throw ApiException('Error al dar de baja el desvío');
+  }
+
+  /// ❌ Eliminar físicamente
+  Future<String> eliminarDesvio(int idDesvio) async {
+    final uri = Uri.parse("$baseUrl/desvios/$idDesvio");
+    final headers = await _jsonHeaders(withAuth: true);
+    final resp = await http.delete(uri, headers: headers);
+
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      final data = _decodeBody(resp);
+      final msg = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : 'Sesión expirada o no autorizada';
+      throw ApiException(msg, statusCode: resp.statusCode);
+    }
+
+    final data = _decodeBody(resp);
+    if (resp.statusCode == 200 && data is Map && data['message'] != null) {
+      return data['message'].toString();
+    }
+    throw ApiException('Error al eliminar el desvío');
+  }
+
+Future<List<Desvio>> listarDesviosActivos() async {
+  final resp = await http.get(
+    Uri.parse("$baseUrl/desvios/activos"),
+    headers: await _jsonHeaders(withAuth: false),
+  );
+
+  if (resp.statusCode != 200) {
+    throw Exception('Error al obtener desvíos activos');
+  }
+
+  final List data = jsonDecode(resp.body);
+  return data.map((e) => Desvio.fromJson(e)).toList();
+}
+
+
+
+Future<List<LatLng>> trazarRutaEvitarDesvios({
+  required LatLng origen,
+  required LatLng destino,
+}) async {
+  final url = Uri.parse("$baseUrl/rutas/evitar_desvios");
+
+  final resp = await http.post(
+    url,
+    headers: {"Content-Type": "application/json"},
+    body: jsonEncode({
+      "origen": {"lat": origen.latitude, "lng": origen.longitude},
+      "destino": {"lat": destino.latitude, "lng": destino.longitude},
+    }),
+  );
+
+  if (resp.statusCode != 200) {
+    throw Exception('Error al obtener ruta: ${resp.body}');
+  }
+
+  final data = jsonDecode(resp.body);
+  final List pts = data["ruta"];
+  return pts
+      .map((p) => LatLng(p["lat"].toDouble(), p["lng"].toDouble()))
+      .toList();
+}
+
+
 }

@@ -1,12 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app/view/buscar_cliente.dart';
-import 'package:flutter_application_1/core/constants.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_application_1/app/view/home.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 
 class ResultadoRutasMapaPage extends StatefulWidget {
@@ -37,7 +33,6 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
 
   final Map<String, Map<String, dynamic>> _clientePorCoord = {};
 
-  static const String _googleApiKey = AppConfig.googleMapsApiKey;
 
   @override
   void initState() {
@@ -137,115 +132,31 @@ class _ResultadoRutasMapaPageState extends State<ResultadoRutasMapaPage> {
     _drawRoadPolyline();
   }
 
-  // =======================
-  // Trazo de ruta por calles
-  // =======================
-  Future<void> _drawRoadPolyline() async {
-    if (_puntosRuta.length < 2) {
-      setState(() => _polylines.clear());
-      return;
-    }
 
-    try {
-      final roadPath = await _fetchRoadPath(_puntosRuta);
-      if (!mounted) return;
-      setState(() {
-        _polylines = {
-          Polyline(
-            polylineId: PolylineId('ruta_vial_${_rutaSeleccionada ?? 'x'}'),
-            points: roadPath,
-            width: 5,
-            color: Colors.lightBlue,
-          ),
-        };
-      });
-      final b = _boundsFromLatLngList(roadPath);
-      _applyOrQueueCameraUpdate(CameraUpdate.newLatLngBounds(b, 50));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _polylines = {
-          Polyline(
-            polylineId: PolylineId('ruta_recta_${_rutaSeleccionada ?? 'x'}'),
-            points: _puntosRuta,
-            width: 4,
-            color: Colors.lightBlue,
-          ),
-        };
-      });
-      final b = _boundsFromLatLngList(_puntosRuta);
-      _applyOrQueueCameraUpdate(CameraUpdate.newLatLngBounds(b, 50));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo obtener ruta por calles: $e')),
-      );
-    }
+Future<void> _drawRoadPolyline() async {
+  if (_puntosRuta.length < 2) {
+    setState(() => _polylines.clear());
+    return;
   }
 
-  Future<List<LatLng>> _fetchRoadPath(List<LatLng> puntos) async {
-    const maxPerRequest = 25;
-    final List<LatLng> resultPath = [];
+  // 🔹 Solo unir los puntos en orden
+  setState(() {
+    _polylines = {
+      Polyline(
+        polylineId: PolylineId('ruta_simple_${_rutaSeleccionada ?? 'x'}'),
+        points: _puntosRuta,
+        width: 4,
+        color: Colors.lightBlue,
+      ),
+    };
+  });
 
-    Future<void> fetchChunk(List<LatLng> chunk) async {
-      if (chunk.length < 2) return;
-      final origin = '${chunk.first.latitude},${chunk.first.longitude}';
-      final destination = '${chunk.last.latitude},${chunk.last.longitude}';
-      final waypoints = (chunk.length > 2)
-          ? '&waypoints=${chunk.sublist(1, chunk.length - 1).map((p) => '${p.latitude},${p.longitude}').join('|')}'
-          : '';
+  final bounds = _boundsFromLatLngList(_puntosRuta);
+  _applyOrQueueCameraUpdate(CameraUpdate.newLatLngBounds(bounds, 50));
+}
 
-      final url =
-          'https://maps.googleapis.com/maps/api/directions/json?origin=$origin&destination=$destination$waypoints&mode=driving&key=$_googleApiKey';
-      final resp = await http.get(Uri.parse(url));
-      if (resp.statusCode != 200) throw Exception('Directions HTTP ${resp.statusCode}');
-      final data = json.decode(resp.body);
-      if (data['status'] != 'OK' || (data['routes'] as List).isEmpty) {
-        throw Exception('Directions error: ${data['status']}');
-      }
-      final overview = data['routes'][0]['overview_polyline']['points'] as String;
-      final decoded = _decodePolyline(overview);
-      if (resultPath.isNotEmpty && decoded.isNotEmpty) decoded.removeAt(0);
-      resultPath.addAll(decoded);
-    }
 
-    int start = 0;
-    while (start < puntos.length - 1) {
-      final endExclusive = (start + maxPerRequest).clamp(0, puntos.length);
-      final chunk = puntos.sublist(start, endExclusive);
-      await fetchChunk(chunk);
-      start = endExclusive - 1;
-    }
-    return resultPath;
-  }
 
-  List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> poly = [];
-    int index = 0, len = encoded.length;
-    int lat = 0, lng = 0;
-
-    while (index < len) {
-      int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlat = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlng = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
-      lng += dlng;
-
-      poly.add(LatLng(lat / 1e5, lng / 1e5));
-    }
-    return poly;
-  }
 
   void _applyOrQueueCameraUpdate(CameraUpdate update) async {
     if (_mapController == null) {
@@ -662,7 +573,7 @@ Future<void> _guardarRutas() async {
               items: _listaRutas.map((ruta) {
                 return DropdownMenuItem<String>(
                   value: ruta["nombre"],
-                  child: Text("${ruta["nombre"]} (${ruta["placa"]}) - ${ruta["total_puntos"]} pts"),
+                  child: Text("Camión: ${ruta["placa"]} - ${ruta["total_puntos"]} puntos"),
                 );
               }).toList(),
               onChanged: (value) {

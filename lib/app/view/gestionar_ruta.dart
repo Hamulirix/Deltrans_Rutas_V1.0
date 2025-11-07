@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/app/view/editar_ruta.dart';
+import 'package:flutter_application_1/app/view/mapa_ubicacion.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/api_service.dart';
 
 class GestionarRutasPage extends StatefulWidget {
@@ -45,9 +47,9 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error cargando rutas: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error cargando rutas: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -92,13 +94,15 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
       try {
         final msg = await _api.eliminarRuta(ruta.idRuta);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
         _cargarRutas();
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -167,8 +171,9 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                 ),
                                 child: ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor:
-                                        esActiva ? Colors.green : Colors.grey,
+                                    backgroundColor: esActiva
+                                        ? Colors.green
+                                        : Colors.grey,
                                     child: const Icon(
                                       Icons.route,
                                       color: Colors.white,
@@ -186,7 +191,6 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                   trailing: PopupMenuButton<String>(
                                     onSelected: (value) async {
                                       if (value == 'editar') {
-                                        // ✅ Simplemente navega y recarga al volver
                                         await Navigator.push(
                                           context,
                                           MaterialPageRoute(
@@ -195,10 +199,7 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                             ),
                                           ),
                                         );
-
-                                        if (mounted) {
-                                          await _cargarRutas();
-                                        }
+                                        if (mounted) await _cargarRutas();
                                       } else if (value == 'eliminar') {
                                         _confirmarEliminacion(context, ruta);
                                       }
@@ -208,8 +209,10 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                         value: 'editar',
                                         child: Row(
                                           children: [
-                                            Icon(Icons.edit,
-                                                color: Colors.blue),
+                                            Icon(
+                                              Icons.edit,
+                                              color: Colors.blue,
+                                            ),
                                             SizedBox(width: 8),
                                             Text('Editar'),
                                           ],
@@ -219,8 +222,10 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                         value: 'eliminar',
                                         child: Row(
                                           children: [
-                                            Icon(Icons.delete,
-                                                color: Colors.red),
+                                            Icon(
+                                              Icons.delete,
+                                              color: Colors.red,
+                                            ),
                                             SizedBox(width: 8),
                                             Text('Eliminar'),
                                           ],
@@ -229,6 +234,58 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                     ],
                                     icon: const Icon(Icons.more_vert),
                                   ),
+
+                                  // ✅ Aquí está lo nuevo:
+                                  onTap: () async {
+                                    try {
+                                      // Obtiene los puntos de la ruta desde tu API
+                                      final puntosRuta = await _api
+                                          .listarPuntosDeRuta(ruta.idRuta);
+
+                                      if (puntosRuta.isEmpty) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Esta ruta no tiene puntos registrados.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      // Convierte tus puntos a LatLng
+                                      final puntos = puntosRuta
+                                          .map((p) => LatLng(p.lat, p.lng))
+                                          .toList();
+
+                                      // Abre el mapa reutilizando tu MapaUbicacionPage
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => MapaUbicacionPage(
+                                            titulo:
+                                                'Ruta ${ruta.placa ?? ""} (${ruta.fecha ?? ""})',
+                                            puntos: puntos,
+                                            descripcion:
+                                                'Total de puntos: ${puntos.length}',
+                                          ),
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Error al mostrar mapa: $e',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
                                 ),
                               );
                             },
@@ -239,8 +296,10 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                 // Controles de paginación
                 if (_filtradas.isNotEmpty)
                   Padding(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 16,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
