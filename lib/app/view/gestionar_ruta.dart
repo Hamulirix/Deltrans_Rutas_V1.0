@@ -14,7 +14,6 @@ class GestionarRutasPage extends StatefulWidget {
 
 class _GestionarRutasPageState extends State<GestionarRutasPage> {
   final _api = ApiService();
-  List<RutaResumen> _rutas = [];
   List<RutaResumen> _filtradas = [];
   bool _loading = true;
 
@@ -22,29 +21,50 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
   int _paginaActual = 1;
   final int _porPagina = 6;
 
-  // Búsqueda
-  final TextEditingController _busquedaController = TextEditingController();
+  // Filtros
+  DateTime? _fechaSeleccionada;
+  List<Camion> _camiones = [];
+  Camion? _camionSeleccionado;
 
   @override
   void initState() {
     super.initState();
-    _cargarRutas();
+    _cargarCamionesYFiltros();
   }
 
-  @override
-  void dispose() {
-    _busquedaController.dispose();
-    super.dispose();
+  Future<void> _cargarCamionesYFiltros() async {
+    try {
+      setState(() => _loading = true);
+      final camiones = await _api.listarCamiones();
+      _camiones = camiones.where((c) => c.disponible).toList();
+      await _cargarRutas();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error cargando camiones: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _cargarRutas() async {
     try {
       setState(() => _loading = true);
-      final lista = await _api.listarRutas();
+      final fechaParam =
+          _fechaSeleccionada?.toIso8601String().split('T').first ?? '';
+      final idCamion = _camionSeleccionado?.idCamion;
+
+      final lista = await _api.listarRutas(
+        fecha: fechaParam.isEmpty ? null : fechaParam,
+        idCamion: idCamion,
+      );
+
       if (!mounted) return;
       setState(() {
-        _rutas = lista;
         _filtradas = lista;
+        _paginaActual = 1;
       });
     } catch (e) {
       if (!mounted) return;
@@ -56,20 +76,24 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
     }
   }
 
-  void _filtrar(String query) {
-    query = query.toLowerCase();
-    setState(() {
-      _paginaActual = 1;
-      if (query.isEmpty) {
-        _filtradas = _rutas;
-      } else {
-        _filtradas = _rutas.where((r) {
-          final placa = r.placa?.toLowerCase() ?? '';
-          final fecha = r.fecha?.toLowerCase() ?? '';
-          return placa.contains(query) || fecha.contains(query);
-        }).toList();
-      }
-    });
+  void _mostrarSelectorFecha() async {
+    final seleccionada = await showDatePicker(
+      context: context,
+      initialDate: _fechaSeleccionada ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (seleccionada != null) {
+      setState(() => _fechaSeleccionada = seleccionada);
+      _cargarRutas();
+    }
+  }
+
+  String _formatearFecha(DateTime? f) {
+    if (f == null) return '';
+    return "${f.day.toString().padLeft(2, '0')}-"
+        "${f.month.toString().padLeft(2, '0')}-"
+        "${f.year}";
   }
 
   void _confirmarEliminacion(BuildContext context, RutaResumen ruta) async {
@@ -141,31 +165,69 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Campo de búsqueda
+                // 🧭 Filtros (camión y fecha) en columnas
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: TextField(
-                    controller: _busquedaController,
-                    onChanged: _filtrar,
-                    decoration: InputDecoration(
-                      hintText: 'Buscar por placa o fecha...',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _busquedaController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                _busquedaController.clear();
-                                _filtrar('');
-                              },
-                            )
-                          : null,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                  child: Column(
+                    children: [
+const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: IconButton(
+                          icon: const Icon(Icons.clear),
+                          tooltip: "Limpiar filtros",
+                          onPressed: () {
+                            setState(() {
+                              _camionSeleccionado = null;
+                              _fechaSeleccionada = null;
+                            });
+                            _cargarRutas();
+                          },
+                        ),
                       ),
-                    ),
+
+                      DropdownButtonFormField<Camion>(
+                        value: _camionSeleccionado,
+                        items: _camiones.map((c) {
+                          return DropdownMenuItem(
+                            value: c,
+                            child: Text(
+                              "${c.placa} • ${c.marca}",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (c) {
+                          setState(() => _camionSeleccionado = c);
+                          _cargarRutas();
+                        },
+                        decoration: const InputDecoration(
+                          labelText: "Filtrar por camión",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.local_shipping),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: _mostrarSelectorFecha,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: "Filtrar por fecha",
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.calendar_today),
+                          ),
+                          child: Text(
+                            _formatearFecha(_fechaSeleccionada),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ),
+                      ),
+                      
+                    ],
                   ),
                 ),
 
+                // 📋 Lista de rutas
                 Expanded(
                   child: _filtradas.isEmpty
                       ? const Center(child: Text('No hay rutas registradas'))
@@ -248,17 +310,14 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                     ],
                                     icon: const Icon(Icons.more_vert),
                                   ),
-
-                                  // Mostrar mapa con puntos de la ruta
                                   onTap: () async {
                                     try {
                                       final puntosRuta = await _api
                                           .listarPuntosDeRuta(ruta.idRuta);
 
                                       if (puntosRuta.isEmpty) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
                                           const SnackBar(
                                             content: Text(
                                               'Esta ruta no tiene puntos registrados.',
@@ -286,15 +345,11 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                                       );
                                     } catch (e) {
                                       if (!mounted) return;
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Error al mostrar mapa: $e',
-                                          ),
-                                        ),
-                                      );
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(SnackBar(
+                                        content:
+                                            Text('Error al mostrar mapa: $e'),
+                                      ));
                                     }
                                   },
                                 ),
@@ -304,7 +359,7 @@ class _GestionarRutasPageState extends State<GestionarRutasPage> {
                         ),
                 ),
 
-                // Controles de paginación
+                // ⏩ Paginación
                 if (_filtradas.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(

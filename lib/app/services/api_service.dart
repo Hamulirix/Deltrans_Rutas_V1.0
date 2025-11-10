@@ -736,11 +736,22 @@ class ApiService {
     return out;
   }
 
-  Future<List<RutaResumen>> listarRutas() async {
+  Future<List<RutaResumen>> listarRutas({
+    String? fecha,    
+    int? idCamion,      
+  }) async {
+
+    final queryParams = <String, String>{};
+    if (fecha != null && fecha.isNotEmpty) queryParams['fecha'] = fecha;
+    if (idCamion != null) queryParams['id_camion'] = idCamion.toString();
+
+    final uri = Uri.parse("$baseUrl/rutas").replace(queryParameters: queryParams);
+
     final resp = await http.get(
-      Uri.parse("$baseUrl/rutas"),
-      headers: await _jsonHeaders(),
+      uri,
+      headers: await _jsonHeaders(withAuth: true),
     );
+
     return _handleResponse<List<RutaResumen>>(resp, (json) {
       final list = (json as List).cast<Map<String, dynamic>>();
       return list
@@ -749,6 +760,7 @@ class ApiService {
           .toList();
     });
   }
+
 
 
 Future<Map<String, dynamic>> crearRuta({
