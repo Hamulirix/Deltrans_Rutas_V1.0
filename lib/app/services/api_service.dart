@@ -457,26 +457,32 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>?> login(String username, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse("$baseUrl/login"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"username": username, "password": password}),
-      );
+Future<Map<String, dynamic>> login(String username, String password) async {
+  try {
+    final response = await http.post(
+      Uri.parse("$baseUrl/login"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"username": username, "password": password}),
+    );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("jwt_token", data["access_token"]);
-        return data as Map<String, dynamic>;
-      } else {
-        return null;
-      }
-    } catch (e) {
-      throw ApiException("Error de conexión: $e");
+    final data = jsonDecode(response.body);
+
+    if (response.statusCode == 200) {
+      // Login exitoso
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("jwt_token", data["access_token"]);
+      return data;
+    } else {
+      // Devuelve el mensaje de error desde el backend
+      return {
+        "error": data["error"] ?? "Error desconocido",
+      };
     }
+  } catch (e) {
+    throw ApiException("Error de conexión: $e");
   }
+}
+
 
   Future<int> obtenerTotalRutas() async {
     final url = Uri.parse('$baseUrl/reportes/total-rutas');

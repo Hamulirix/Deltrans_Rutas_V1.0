@@ -31,6 +31,8 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   StreamSubscription<Position>? _posSub;
 
   // Datos de la ruta
+  bool _primerInicio = true;
+
   int? _idRuta;
   List<PuntoRutaDet> _puntos = [];
   int _indexActual = 0;
@@ -53,11 +55,17 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
     _cargarRuta();
   }
 
-  @override
-  void dispose() {
-    _posSub?.cancel();
-    super.dispose();
+ @override
+void dispose() {
+  _posSub?.cancel();
+
+  if (!_mapController.isCompleted) {
+    _mapController.completeError(Exception('disposed'));
   }
+
+  super.dispose();
+}
+
 
   // ============================
   // Carga inicial (ruta + puntos)
@@ -210,12 +218,14 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
               _posicionActual!,
               _polylinePoints,
             );
-            if (distMin > 60) {
-              // más de 60 metros fuera del camino
+
+            // Ignorar el primer cálculo para evitar falso positivo
+            if (!_primerInicio && distMin > 60) {
               _posSub?.pause();
               await _mostrarModalDesvio();
               _posSub?.resume();
             }
+            _primerInicio = false;
           }
 
           final destino = LatLng(_puntoActual!.latitud, _puntoActual!.longitud);
@@ -378,9 +388,10 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   }
 
   Future<void> _ajustarCamara(LatLng origen, PuntoRutaDet destino) async {
-    final ctrl = await (_mapController.isCompleted
-        ? _mapController.future
-        : Future<GoogleMapController?>.value(null));
+    if (!mounted) return; // evita acceso tras salir
+    if (!_mapController.isCompleted) return;
+
+    final ctrl = await _mapController.future;
     if (ctrl == null) return;
 
     final bounds = LatLngBounds(
@@ -393,7 +404,12 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
         math.max(origen.longitude, destino.longitud),
       ),
     );
-    await ctrl.animateCamera(CameraUpdate.newLatLngBounds(bounds, 96));
+
+    try {
+      await ctrl.animateCamera(CameraUpdate.newLatLngBounds(bounds, 96));
+    } catch (_) {
+      // Si el mapa fue destruido, ignorar sin lanzar excepción
+    }
   }
 
   // ============================

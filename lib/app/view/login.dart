@@ -29,14 +29,14 @@ class _LoginPageState extends State<LoginPage> {
         _passwordController.text.trim(),
       );
 
-      if (result != null && result["access_token"] != null) {
+      if (result.containsKey("access_token")) {
+        // Login exitoso
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString("jwt_token", result["access_token"]);
 
         final rolId = result["trabajador"]["id_tipo_trabajador"] as int;
         await prefs.setInt("id_tipo_trabajador", rolId);
 
-        // Nombre y placa
         final nombreCompleto =
             "${result["trabajador"]["nombres"]} ${result["trabajador"]["apellidos"]}";
         await prefs.setString("nombre", nombreCompleto);
@@ -51,16 +51,13 @@ class _LoginPageState extends State<LoginPage> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (context) => Home(
-                nombre: nombreCompleto,
-                rol: rol,
-                placaCamion: placa, // <-- pasamos la placa
-              ),
+              builder: (context) =>
+                  Home(nombre: nombreCompleto, rol: rol, placaCamion: placa),
             ),
           );
         }
       } else {
-        setState(() => _errorMessage = "Credenciales incorrectas");
+        setState(() => _errorMessage = result["error"] ?? "Error desconocido");
       }
     } catch (e) {
       setState(() => _errorMessage = e.toString());
@@ -86,14 +83,22 @@ class _LoginPageState extends State<LoginPage> {
                   children: <Widget>[
                     const Image(image: AssetImage('images/logo_deltrans.png')),
                     const SizedBox(height: 50),
-                    const Text('Iniciar Sesión',
-                        textAlign: TextAlign.center,
-                        style:
-                            TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Iniciar Sesión',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 16),
-                    const Text('Usuario',
-                        style:
-                            TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Usuario',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _usernameController,
@@ -103,9 +108,13 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text('Contraseña',
-                        style:
-                            TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Contraseña',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _passwordController,
@@ -120,15 +129,19 @@ class _LoginPageState extends State<LoginPage> {
                       Text(
                         _errorMessage!,
                         style: const TextStyle(
-                            color: Colors.red, fontWeight: FontWeight.bold),
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ElevatedButton(
                       onPressed: _isLoading ? null : _login,
                       child: _isLoading
                           ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Iniciar sesión',
-                              style: TextStyle(fontSize: 18)),
+                          : const Text(
+                              'Iniciar sesión',
+                              style: TextStyle(fontSize: 18),
+                            ),
                     ),
                   ],
                 ),
