@@ -129,7 +129,7 @@ Future<bool> _asegurarUbicacionActiva() async {
     // 1. Verificar si GPS está encendido
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      final activado = await Geolocator.openLocationSettings();
+      await Geolocator.openLocationSettings();
       await Future.delayed(const Duration(seconds: 1));
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
@@ -337,18 +337,20 @@ Future<bool> _asegurarUbicacionActiva() async {
   // ============================================
   // Modal desvío + registro + recalcular
   // ============================================
-  Future<void> _mostrarModalDesvio() async {
-    if (!mounted) return;
+Future<void> _mostrarModalDesvio() async {
+  if (!mounted) return;
 
-    String? motivo = await showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
+  String? motivo = await showDialog<String>(
+    context: context,
+    barrierDismissible: false, // ❗ evita cerrar con tap afuera
+    builder: (_) => WillPopScope(
+      onWillPop: () async => false, // ❗ evita cerrar con atrás
+      child: AlertDialog(
         title: const Text("Desvío detectado"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-                "Te alejaste de la ruta. ¿Cuál fue el motivo?"),
+            const Text("Te alejaste de la ruta. ¿Cuál fue el motivo?"),
             for (final m in [
               "Calle cerrada",
               "Mucho tráfico",
@@ -362,42 +364,48 @@ Future<bool> _asegurarUbicacionActiva() async {
           ],
         ),
       ),
+    ),
+  );
+
+  // Si no selecciona nada (teóricamente no debería pasar)
+  if (motivo == null) {
+    _historialDesvio.clear();
+    return;
+  }
+
+  if (_idRuta != null && _posicionActual != null) {
+    await _api.registrarDesvio(
+      idRuta: _idRuta!,
+      motivo: motivo,
+      lat: _posicionActual!.latitude,
+      lng: _posicionActual!.longitude,
     );
 
-    if (motivo != null &&
-        _idRuta != null &&
-        _posicionActual != null) {
-      await _api.registrarDesvio(
-        idRuta: _idRuta!,
-        motivo: motivo,
-        lat: _posicionActual!.latitude,
-        lng: _posicionActual!.longitude,
-      );
+    _toast("Desvío registrado: $motivo");
 
-      _toast("Desvío registrado: $motivo");
-
-      _markers.add(
-        Marker(
-          markerId:
-              MarkerId("desvio_${DateTime.now().millisecondsSinceEpoch}"),
-          position: _posicionActual!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange,
-          ),
-          infoWindow: InfoWindow(title: "Desvío: $motivo"),
+    _markers.add(
+      Marker(
+        markerId: MarkerId(
+          "desvio_${DateTime.now().millisecondsSinceEpoch}",
         ),
-      );
-
-      if (_puntoActual != null) {
-        await _trazarRuta(
-          _posicionActual!,
-          LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
-        );
-      }
-    }
-
-    _historialDesvio.clear();
+        position: _posicionActual!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        infoWindow: InfoWindow(title: "Desvío: $motivo"),
+      ),
+    );
   }
+
+  // Recalcular ruta
+  if (_puntoActual != null) {
+    await _trazarRuta(
+      _posicionActual!,
+      LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
+    );
+  }
+
+  _historialDesvio.clear();
+}
+
 
   // ============================================
   // Llegada a un punto
