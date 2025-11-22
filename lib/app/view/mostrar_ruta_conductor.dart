@@ -8,6 +8,15 @@ import 'package:geolocator/geolocator.dart';
 
 import 'package:flutter_application_1/app/services/api_service.dart';
 
+/// Una muestra de posible desvío
+class _DesvioSample {
+  final LatLng pos;
+  final double dist; // distancia mínima al polyline (m)
+  final DateTime ts;
+
+  _DesvioSample(this.pos, this.dist, this.ts);
+}
+
 class MostrarRutaConductorPage extends StatefulWidget {
   final String placa;
   final DateTime fecha;
@@ -31,6 +40,7 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   final Set<Polyline> _polylines = {};
   StreamSubscription<Position>? _posSub;
 
+  bool _cargando = true;
   bool _primerInicio = true;
 
   int? _idRuta;
@@ -44,13 +54,17 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
 
   LatLng? _posicionActual;
 
+  /// polyline actual (ORS)
   List<LatLng> _polylinePoints = [];
 
-  bool _cargando = true;
+  /// Buffer para detectar desvíos suavizados
+  final List<_DesvioSample> _bufferDesvio = [];
+  static const int _bufferSize = 8;
+  static const int _minLecturasConfirmar = 2;
+  static const double _umbralDesvioMetros = 35.0;
 
-  /// buffers para evitar falsos positivos de desvío
-  final List<double> _historialDesvio = [];
-  static const int _minLecturasConfirmar = 3;
+  /// Punto donde realmente se detectó el desvío
+  LatLng? _posicionDesvioDetectada;
 
   @override
   void initState() {
@@ -61,7 +75,6 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   @override
   void dispose() {
     _posSub?.cancel();
-
     if (!_mapController.isCompleted) {
       _mapController.completeError(Exception('disposed'));
     }
@@ -86,6 +99,7 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
         _indexActual = 0;
         _cargando = false;
 
+        // marcadores de desvíos existentes
         for (final d in desvios) {
           _markers.add(
             Marker(
@@ -101,7 +115,8 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
       });
 
       final ok = await _asegurarUbicacionActiva();
-      if (!ok) return; // evita crasheo
+      if (!ok) return;
+
       _dibujarMarcadoresPuntos();
 
       if (_posicionActual != null && _puntoActual != null) {
@@ -121,72 +136,65 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   }
 
   // ============================================
-  // Obtener ubicación del usuario
+  // Ubicación del usuario
   // ============================================
-
-Future<bool> _asegurarUbicacionActiva() async {
-  try {
-    // 1. Verificar si GPS está encendido
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      await Geolocator.openLocationSettings();
-      await Future.delayed(const Duration(seconds: 1));
-      serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
+  Future<bool> _asegurarUbicacionActiva() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _toast("Activa el GPS para continuar.");
+        await Geolocator.openLocationSettings();
+        await Future.delayed(const Duration(seconds: 1));
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+        if (!serviceEnabled) {
+          _toast("Activa el GPS para continuar.");
+          return false;
+        }
+      }
+
+      LocationPermission perm = await Geolocator.checkPermission();
+
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+
+      if (perm == LocationPermission.deniedForever) {
+        _toast("La app no tiene permisos de ubicación.");
         return false;
       }
-    }
 
-    // 2. Permisos actuales
-    LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        _toast("No otorgaste permisos de ubicación.");
+        return false;
+      }
 
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-
-    if (perm == LocationPermission.deniedForever) {
-      _toast("La app no tiene permisos de ubicación. Ve a Ajustes.");
-      return false;
-    }
-
-    if (perm == LocationPermission.denied) {
-      _toast("No otorgaste permisos de ubicación.");
-      return false;
-    }
-
-    // 3. Intentar obtener ubicación (puede fallar)
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      _posicionActual = LatLng(pos.latitude, pos.longitude);
-      _actualizarMarcadorYo();
-      return true; // OK
-    } catch (e) {
-      // Error común cuando el GPS recién está activándose
-      await Future.delayed(const Duration(seconds: 2));
       try {
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
+
         _posicionActual = LatLng(pos.latitude, pos.longitude);
         _actualizarMarcadorYo();
         return true;
       } catch (_) {
-        _toast("No pude obtener tu ubicación. Intenta de nuevo.");
-        return false;
+        await Future.delayed(const Duration(seconds: 2));
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          _posicionActual = LatLng(pos.latitude, pos.longitude);
+          _actualizarMarcadorYo();
+          return true;
+        } catch (_) {
+          _toast("No se pudo obtener tu ubicación.");
+          return false;
+        }
       }
+    } catch (e) {
+      _toast("Error de ubicación: $e");
+      return false;
     }
-  } catch (e) {
-    _toast("Error de ubicación: $e");
-    return false;
   }
-}
-
-
 
   void _actualizarMarcadorYo() {
     if (_posicionActual == null) return;
@@ -203,7 +211,7 @@ Future<bool> _asegurarUbicacionActiva() async {
   }
 
   // ============================================
-  // Marcadores de puntos
+  // Marcadores de puntos de la ruta
   // ============================================
   void _dibujarMarcadoresPuntos() {
     _markers.removeWhere((m) => m.markerId.value.startsWith("p_"));
@@ -233,7 +241,7 @@ Future<bool> _asegurarUbicacionActiva() async {
   }
 
   // ============================================
-  // Seguimiento con filtros anti-falsos positivos
+  // Seguimiento en tiempo real
   // ============================================
   Future<void> _iniciarSeguimientoTiempoReal() async {
     if (_puntos.isEmpty) return;
@@ -264,7 +272,7 @@ Future<bool> _asegurarUbicacionActiva() async {
         destino.longitude,
       );
 
-      // --- Llegada al punto ---
+      // Llegada a punto
       if (distancia < 40 && !puntosVisitados.contains(_puntoActual!.idPunto)) {
         procesandoLlegada = true;
         puntosVisitados.add(_puntoActual!.idPunto);
@@ -273,20 +281,34 @@ Future<bool> _asegurarUbicacionActiva() async {
         return;
       }
 
-      // --- Detectar desvío con filtro ---
-      if (_polylinePoints.isNotEmpty) {
+      // Detectar desvío usando el polyline existente (NO llamamos ORS aquí)
+      if (_polylinePoints.length > 1) {
         final dMin = _distanciaMinimaAPolyline(
           _posicionActual!,
           _polylinePoints,
         );
 
-        _pushDesvioBuffer(dMin);
+        _registrarSampleDesvio(_posicionActual!, dMin);
 
-        if (_esDesvioConfirmado()) {
-          _posSub?.pause();
-          await _mostrarModalDesvio();
-          _posSub?.resume();
-          return;
+        if (_esDesvioConfirmado() &&
+            _posicionDesvioDetectada == null) {
+          // tomamos la PRIMERA muestra fuera de la ruta
+          _DesvioSample? cand;
+          for (final s in _bufferDesvio) {
+            if (s.dist > _umbralDesvioMetros) {
+              cand = s;
+              break;
+            }
+          }
+          cand ??= _bufferDesvio.isNotEmpty ? _bufferDesvio.last : null;
+
+          if (cand != null) {
+            _posicionDesvioDetectada = cand.pos;
+            _posSub?.pause();
+            await _mostrarModalDesvio();
+            _posSub?.resume();
+            return;
+          }
         }
       }
 
@@ -294,63 +316,98 @@ Future<bool> _asegurarUbicacionActiva() async {
     });
   }
 
-  // FILTRO ANTI-FALSOS POSITIVOS
-  void _pushDesvioBuffer(double d) {
-    _historialDesvio.add(d);
-    if (_historialDesvio.length > _minLecturasConfirmar) {
-      _historialDesvio.removeAt(0);
+  // Registrar muestra en el buffer
+  void _registrarSampleDesvio(LatLng pos, double dist) {
+    _bufferDesvio.add(_DesvioSample(pos, dist, DateTime.now()));
+    if (_bufferDesvio.length > _bufferSize) {
+      _bufferDesvio.removeAt(0);
     }
   }
 
   bool _esDesvioConfirmado() {
     if (_primerInicio) return false;
-    if (_historialDesvio.length < _minLecturasConfirmar) return false;
+    if (_bufferDesvio.length < _minLecturasConfirmar) return false;
 
-    // Suavizado: promedio vs último valor
-    final promedio = _historialDesvio.reduce((a, b) => a + b) /
-        _historialDesvio.length;
+    final ultimos = _bufferDesvio.sublist(
+      _bufferDesvio.length - _minLecturasConfirmar,
+    );
+    final promedio =
+        ultimos.map((s) => s.dist).reduce((a, b) => a + b) / ultimos.length;
 
-    // Umbral dinámico
-    const umbral = 60;
-
-    return promedio > umbral;
+    return promedio > _umbralDesvioMetros;
   }
 
-  // Distancia más corta a polyline
-  double _distanciaMinimaAPolyline(
-      LatLng p, List<LatLng> polyline) {
-    double minDist = double.infinity;
+double _distanciaMinimaAPolyline(LatLng p, List<LatLng> pts) {
+  double minDist = double.infinity;
 
-    for (int i = 0; i < polyline.length - 1; i++) {
-      final d = Geolocator.distanceBetween(
-        p.latitude,
-        p.longitude,
-        polyline[i].latitude,
-        polyline[i].longitude,
-      );
-      if (d < minDist) minDist = d;
-    }
+  for (int i = 0; i < pts.length - 1; i++) {
+    final A = pts[i];
+    final B = pts[i + 1];
 
-    return minDist;
+    final d = _distanceToSegmentMeters(p, A, B);
+
+    if (d < minDist) minDist = d;
   }
+
+  return minDist;
+}
+
+/// Distancia desde punto P al segmento AB (en metros)
+double _distanceToSegmentMeters(LatLng P, LatLng A, LatLng B) {
+  // Convertimos a coordenadas planas (aprox local)
+  final lat1 = A.latitude * math.pi / 180;
+  final lon1 = A.longitude * math.pi / 180;
+  final lat2 = B.latitude * math.pi / 180;
+  final lon2 = B.longitude * math.pi / 180;
+  final latP = P.latitude * math.pi / 180;
+  final lonP = P.longitude * math.pi / 180;
+
+  // vectores
+  final AtoB_lat = lat2 - lat1;
+  final AtoB_lon = lon2 - lon1;
+  final AtoP_lat = latP - lat1;
+  final AtoP_lon = lonP - lon1;
+
+  // Proyección escalar
+  final ab2 = AtoB_lat * AtoB_lat + AtoB_lon * AtoB_lon;
+  double t = 0;
+  if (ab2 > 0) {
+    t = (AtoP_lat * AtoB_lat + AtoP_lon * AtoB_lon) / ab2;
+    t = t.clamp(0.0, 1.0);
+  }
+
+  // Punto proyectado
+  final projLat = lat1 + t * AtoB_lat;
+  final projLon = lon1 + t * AtoB_lon;
+
+  // Distancia desde P a la proyección
+  return Geolocator.distanceBetween(
+    P.latitude,
+    P.longitude,
+    projLat * 180 / math.pi,
+    projLon * 180 / math.pi,
+  );
+}
+
 
   // ============================================
-  // Modal desvío + registro + recalcular
+  // Modal y registro del desvío
   // ============================================
 Future<void> _mostrarModalDesvio() async {
   if (!mounted) return;
 
+  // 1) Elegir motivo
   String? motivo = await showDialog<String>(
     context: context,
-    barrierDismissible: false, // ❗ evita cerrar con tap afuera
+    barrierDismissible: false,
     builder: (_) => WillPopScope(
-      onWillPop: () async => false, // ❗ evita cerrar con atrás
+      onWillPop: () async => false,
       child: AlertDialog(
         title: const Text("Desvío detectado"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Te alejaste de la ruta. ¿Cuál fue el motivo?"),
+            const Text("Selecciona el motivo del desvío"),
             for (final m in [
               "Calle cerrada",
               "Mucho tráfico",
@@ -360,51 +417,162 @@ Future<void> _mostrarModalDesvio() async {
               ListTile(
                 title: Text(m),
                 onTap: () => Navigator.pop(context, m),
-              )
+              ),
           ],
         ),
       ),
     ),
   );
 
-  // Si no selecciona nada (teóricamente no debería pasar)
   if (motivo == null) {
-    _historialDesvio.clear();
+    _bufferDesvio.clear();
+    _posicionDesvioDetectada = null;
     return;
   }
 
-  if (_idRuta != null && _posicionActual != null) {
+  // 🔥 2) Seleccionar punto exacto tocando el mapa
+  final puntoMarcado = await _seleccionarPuntoEnMapa();
+
+  if (puntoMarcado == null) {
+    _toast("No se seleccionó un punto.");
+    return;
+  }
+
+  // 🔥 3) Validar que está sobre el polyline
+  final distancia = _distanciaMinimaAPolyline(puntoMarcado, _polylinePoints);
+
+  if (distancia > 20) {
+    _toast("Debes marcar un punto dentro de la ruta.");
+    return;
+  }
+
+  // 🔥 4) Registrar desvío con punto marcado
+  if (_idRuta != null) {
     await _api.registrarDesvio(
       idRuta: _idRuta!,
       motivo: motivo,
-      lat: _posicionActual!.latitude,
-      lng: _posicionActual!.longitude,
+      lat: puntoMarcado.latitude,
+      lng: puntoMarcado.longitude,
     );
+  }
 
-    _toast("Desvío registrado: $motivo");
+  _toast("Desvío registrado exitosamente");
 
-    _markers.add(
-      Marker(
-        markerId: MarkerId(
-          "desvio_${DateTime.now().millisecondsSinceEpoch}",
-        ),
-        position: _posicionActual!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        infoWindow: InfoWindow(title: "Desvío: $motivo"),
+  // Marcador visual
+  _markers.add(
+    Marker(
+      markerId: MarkerId("desvio_${DateTime.now().millisecondsSinceEpoch}"),
+      position: puntoMarcado,
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      infoWindow: InfoWindow(title: "Desvío: $motivo"),
+    ),
+  );
+
+  // Reiniciar buffers
+  _bufferDesvio.clear();
+  _posicionDesvioDetectada = null;
+  _primerInicio = true;
+
+  if (!mounted) return;
+
+  // Recargar pantalla
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => MostrarRutaConductorPage(
+        placa: widget.placa,
+        fecha: widget.fecha,
       ),
-    );
-  }
-
-  // Recalcular ruta
-  if (_puntoActual != null) {
-    await _trazarRuta(
-      _posicionActual!,
-      LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
-    );
-  }
-
-  _historialDesvio.clear();
+    ),
+  );
 }
+
+Future<LatLng?> _seleccionarPuntoEnMapa() async {
+  LatLng? puntoSeleccionado;
+
+  return await showDialog<LatLng>(
+    context: context,
+    barrierDismissible: false, // No puede cerrar tocando afuera
+    builder: (ctx) {
+      return WillPopScope(
+        onWillPop: () async => false, // No puede usar botón atrás
+        child: StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text("Marca el punto exacto del incidente"),
+              content: SizedBox(
+                width: 350,
+                height: 450,
+                child: GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: _posicionActual!,
+                    zoom: 17,
+                  ),
+                  polylines: _polylines,
+                  markers: puntoSeleccionado != null
+                      ? {
+                          Marker(
+                            markerId: const MarkerId("seleccion"),
+                            position: puntoSeleccionado!,
+                            icon: BitmapDescriptor.defaultMarkerWithHue(
+                              BitmapDescriptor.hueOrange,
+                            ),
+                          )
+                        }
+                      : {},
+                  onTap: (pos) {
+                    setStateDialog(() {
+                      puntoSeleccionado = pos;
+                    });
+                  },
+                ),
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () {
+                    if (puntoSeleccionado == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Selecciona un punto en el mapa."),
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Validar distancia al polyline
+                    final distancia = _distanciaMinimaAPolyline(
+                      puntoSeleccionado!,
+                      _polylinePoints,
+                    );
+
+                    if (distancia > 20) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Debes marcar un punto dentro de la ruta.",
+                          ),
+                        ),
+                      );
+                      return; 
+                    }
+
+                    // Punto válido, cerrar y devolverlo
+                    Navigator.pop(context, puntoSeleccionado);
+                  },
+                  child: const Text("Aceptar"),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    },
+  );
+}
+
+
+
+
 
 
   // ============================================
@@ -427,11 +595,13 @@ Future<void> _mostrarModalDesvio() async {
     if (_indexActual < _puntos.length - 1) {
       setState(() => _indexActual++);
 
-      await _trazarRuta(
-        _posicionActual!,
-        LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
-      );
-      await _centrarEnRuta(_posicionActual!, _puntoActual!);
+      if (_posicionActual != null) {
+        await _trazarRuta(
+          _posicionActual!,
+          LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
+        );
+        await _centrarEnRuta(_posicionActual!, _puntoActual!);
+      }
     } else {
       if (_idRuta != null) {
         await _api.actualizarEstadoRuta(idRuta: _idRuta!, estado: false);
@@ -529,7 +699,6 @@ Future<void> _mostrarModalDesvio() async {
                     }
                   },
                 ),
-
                 if (_puntoActual != null)
                   Positioned(
                     top: 28,
@@ -560,8 +729,10 @@ Future<void> _mostrarModalDesvio() async {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Orden: ${p.orden}",
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            "Orden: ${p.orden}",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           Text("Código: ${p.cliente.codigo}"),
           Text("Cliente: ${p.cliente.nombres}"),
           Text("Giro: ${p.cliente.giro}"),
