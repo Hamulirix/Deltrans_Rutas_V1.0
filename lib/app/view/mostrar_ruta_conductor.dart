@@ -575,7 +575,13 @@ Future<LatLng?> _seleccionarPuntoEnMapa() async {
   // Llegada a un punto
   // ============================================
   Future<void> _onLlegadaAPunto(PuntoRutaDet punto) async {
-    _toast("Llegaste a ${punto.cliente.nombres}");
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Llegaste a ${punto.cliente.nombres}"),
+        duration: const Duration(seconds: 10),
+      ),
+    );
 
     try {
       if (_idRuta != null) {
@@ -585,7 +591,13 @@ Future<LatLng?> _seleccionarPuntoEnMapa() async {
         );
       }
     } catch (_) {
-      _toast("No pude marcar punto como visitado");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No pude marcar punto como visitado"),
+          duration: Duration(seconds: 10),
+        ),
+      );
     }
 
     if (_indexActual < _puntos.length - 1) {
@@ -602,7 +614,13 @@ Future<LatLng?> _seleccionarPuntoEnMapa() async {
       if (_idRuta != null) {
         await _api.actualizarEstadoRuta(idRuta: _idRuta!, estado: false);
       }
-      _toast("Ruta terminada");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Ruta terminada"),
+          duration: Duration(seconds: 10),
+        ),
+      );
       if (mounted) Navigator.pop(context);
     }
   }
