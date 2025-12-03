@@ -60,7 +60,7 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   /// Buffer para detectar desvíos suavizados
   final List<_DesvioSample> _bufferDesvio = [];
   static const int _bufferSize = 8;
-  static const int _minLecturasConfirmar = 2;
+  static const int _minLecturasConfirmar = 4;
   static const double _umbralDesvioMetros = 50.0;
 
   /// Punto donde realmente se detectó el desvío
