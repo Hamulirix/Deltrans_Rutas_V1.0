@@ -66,8 +66,14 @@ class _OptimizarRutasPageState extends State<OptimizarRutasPage> {
       }
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
+      
+      String errorMessage = e.toString();
+      if (e is ApiException) {
+        errorMessage = e.message;
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al optimizar: $e')),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }
