@@ -61,7 +61,7 @@ class _MostrarRutaConductorPageState extends State<MostrarRutaConductorPage> {
   final List<_DesvioSample> _bufferDesvio = [];
   static const int _bufferSize = 8;
   static const int _minLecturasConfirmar = 2;
-  static const double _umbralDesvioMetros = 35.0;
+  static const double _umbralDesvioMetros = 50.0;
 
   /// Punto donde realmente se detectó el desvío
   LatLng? _posicionDesvioDetectada;
@@ -471,20 +471,16 @@ Future<void> _mostrarModalDesvio() async {
   // Reiniciar buffers
   _bufferDesvio.clear();
   _posicionDesvioDetectada = null;
-  _primerInicio = true;
 
-  if (!mounted) return;
+  // 🔥 Retrazar ruta sin recargar toda la pantalla
+  if (_posicionActual != null && _puntoActual != null) {
+    await _trazarRuta(
+      _posicionActual!,
+      LatLng(_puntoActual!.latitud, _puntoActual!.longitud),
+    );
+  }
 
-  // Recargar pantalla
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => MostrarRutaConductorPage(
-        placa: widget.placa,
-        fecha: widget.fecha,
-      ),
-    ),
-  );
+  setState(() {});
 }
 
 Future<LatLng?> _seleccionarPuntoEnMapa() async {
